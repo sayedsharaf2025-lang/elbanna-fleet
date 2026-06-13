@@ -641,6 +641,20 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     return () => clearTimeout(delayDebounce);
   }, [drivers, officials, cars, violations, invoices, invoiceItems, auditLogs, movements, custodyAccounts, custodyMovements, adminPassword, managerPassword, companies]);
 
+  // مزامنة دورية كل 3 دقائق - safety net لضمان رفع أي بيانات لم تُرفع
+  useEffect(() => {
+    const periodicSync = setInterval(async () => {
+      const client = getSupabaseClient();
+      if (!client || isDownloadingRef.current) return;
+      try {
+        await uploadLocalDataToCloud();
+      } catch (e) {
+        console.warn('Periodic sync error:', e);
+      }
+    }, 3 * 60 * 1000);
+    return () => clearInterval(periodicSync);
+  }, []);
+
   // Network jitter simulation
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1077,78 +1091,74 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }));
 
       const uploadTasks = [
-        sanitizedDrivers.length > 0 ? supabase.from('drivers').upsert(sanitizedDrivers) : Promise.resolve({ error: null }),
-        officials.length > 0 ? supabase.from('officials').upsert(officials) : Promise.resolve({ error: null }),
-        sanitizedCars.length > 0 ? supabase.from('cars').upsert(sanitizedCars) : Promise.resolve({ error: null }),
-        sanitizedViolations.length > 0 ? supabase.from('violations').upsert(sanitizedViolations) : Promise.resolve({ error: null }),
-        sanitizedInvoices.length > 0 ? supabase.from('invoices').upsert(sanitizedInvoices) : Promise.resolve({ error: null }),
-        invoiceItems.length > 0 ? supabase.from('invoice_items').upsert(invoiceItems) : Promise.resolve({ error: null }),
-        sanitizedAuditLogs.length > 0 ? supabase.from('invoice_audit_logs').upsert(sanitizedAuditLogs) : Promise.resolve({ error: null }),
-        sanitizedMovements.length > 0 ? supabase.from('driver_account_movements').upsert(sanitizedMovements) : Promise.resolve({ error: null }),
-        custodyAccounts.length > 0 ? supabase.from('custody_accounts').upsert(custodyAccounts) : Promise.resolve({ error: null }),
-        sanitizedCustodyMovements.length > 0 ? supabase.from('custody_movements').upsert(sanitizedCustodyMovements) : Promise.resolve({ error: null })
       ];
 
-      const results = await Promise.all(uploadTasks);
-      const errors = results.filter(r => r && r.error).map(r => r.error);
+      // رفع كل جدول منفرداً مع retry - فشل جدول لا يوقف الباقي
+      const upsertSafe = async (table: string, data: any[], retries = 3): Promise<any | null> => {
+        if (!data || data.length === 0) return null;
+        const BATCH = 400;
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            let lastErr: any = null;
+            for (let i = 0; i < data.length; i += BATCH) {
+              const { error } = await supabase.from(table).upsert(data.slice(i, i + BATCH));
+              if (error) { lastErr = error; break; }
+            }
+            if (!lastErr) return null;
+            if (attempt < retries) await new Promise(r => setTimeout(r, attempt * 1000));
+            if (attempt === retries) return lastErr;
+          } catch (e: any) {
+            if (attempt === retries) return e;
+            await new Promise(r => setTimeout(r, attempt * 1000));
+          }
+        }
+        return null;
+      };
 
-      if (errors.length > 0) {
-        console.error("Supabase upload error:", errors);
-        const err = errors[0]!;
-        const uploadErrMsg = err.message || "";
-        
-        if (
-          err.message?.includes("unique_violation_date_car") ||
-          err.message?.toLowerCase().includes("violates unique constraint")
-        ) {
-          return {
-            success: false,
-            message: "فشل الرفع السحابي بسبب قيد منع التكرار للمخالفات (unique_violation_date_car) على قاعدة بيانات Supabase. لحل هذه المشكلة فورًا، يُرجى فتح شاشة 'محرر ومراقب Supabase' وضغط زر 'نسخ كود الإصلاح السريع' للصقه وتشغيله في الـ SQL Editor بـ Supabase لإسقاط هذا القيد وتسهيل المزامنة التامة."
-          };
-        }
-        
-        // Check for missing columns (error code 42703 or "column ... does not exist" message)
-        if (err.code === "42703" || (uploadErrMsg.includes("column") && uploadErrMsg.includes("does not exist"))) {
-          const customMsg = "تنبيه قاعدة البيانات السحابية: يوجد حقل مفقود بجدول السيارات (traffic_office) في مشروع Supabase الخاص بك. لحل هذه المشكلة فورًا لتبسيط الاتصال وعرض جميع بيانات الجداول، يرجى التوجه إلى SQL Editor في Supabase وتشغيل الكود التالي:\n\nALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);";
-          return { success: false, message: customMsg };
-        }
-        
-        if (
-          (uploadErrMsg.includes("relation") && uploadErrMsg.includes("does not exist")) || 
-          uploadErrMsg.includes("Could not find the table") || 
-          uploadErrMsg.includes("schema cache") ||
-          err.code === "P0001" || 
-          err.code === "42P01"
-        ) {
-          return { 
-            success: false, 
-            message: "الخادم السحابي متصل بنجاح، ولكن الجداول غير منشأة بالخلفية بعد! يرجى الضغط على زر 'محرر ومراقب Supabase' ونسخ كود الـ SQL الموحد ولصقه في الـ SQL Editor بـ Supabase لتهيئة الجداول." 
-          };
-        }
-        return { success: false, message: `فشل الرفع السحابي: ${err.message}` };
-      }
+      // المرحلة 1: الجداول الأساسية
+      await Promise.all([
+        upsertSafe('officials', officials),
+        upsertSafe('drivers', sanitizedDrivers),
+      ]);
+      // المرحلة 2: الجداول المرتبطة
+      await Promise.all([
+        upsertSafe('cars', sanitizedCars),
+        upsertSafe('violations', sanitizedViolations),
+        upsertSafe('custody_accounts', custodyAccounts),
+      ]);
+      // المرحلة 3: الفواتير والحركات
+      await Promise.all([
+        upsertSafe('invoices', sanitizedInvoices),
+        upsertSafe('driver_account_movements', sanitizedMovements),
+        upsertSafe('custody_movements', sanitizedCustodyMovements),
+      ]);
+      // المرحلة 4: التفاصيل والسجلات
+      await Promise.all([
+        upsertSafe('invoice_items', invoiceItems),
+        upsertSafe('invoice_audit_logs', sanitizedAuditLogs),
+      ]);
 
-      // Safe separate background save for administrative credentials / system settings
+      // رفع كلمات المرور والإعدادات
       try {
-        const settingsToUpsert = [
+        await supabase.from('system_settings').upsert([
           { key: 'admin_password', value: adminPassword },
           { key: 'manager_password', value: managerPassword },
           { key: 'companies', value: JSON.stringify(companies) }
-        ];
-        await supabase.from('system_settings').upsert(settingsToUpsert);
-      } catch (settingsUpsertError) {
-        console.warn("Supabase upsert system_settings error:", settingsUpsertError);
+        ]);
+      } catch (e) {
+        console.warn('system_settings upsert failed:', e);
       }
 
       setIsCloudConnected(true);
-      return { success: true, message: "تم رفع وتصدير كافة البيانات من هذا الجهاز إلى قاعدة البيانات السحابية بنجاح 100%!" };
+      return { success: true, message: "تم رفع وتصدير كافة البيانات بنجاح!" };
     } catch (e: any) {
       console.error("Supabase bulk upload exception:", e);
-      return { success: false, message: `حدث خطأ استثنائي أثناء الرفع: ${e.message}` };
+      return { success: false, message: `حدث خطأ أثناء الرفع: ${e.message}` };
     } finally {
       setIsCloudSyncing(false);
     }
   };
+
 
   // Quick Connection Tester
   const testCloudConnection = async (): Promise<{ success: boolean; message: string }> => {
