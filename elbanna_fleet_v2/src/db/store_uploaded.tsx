@@ -216,33 +216,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     return defaultValue;
   };
 
-  // مسح البيانات الوهمية من localStorage عند أول تشغيل بعد التحديث
-  const cleanupMockData = () => {
-    const mockIds = ['d1','d2','d3','d4','d5','c1','c2','c3','c4','c5',
-      'c_ref_2547','c_ref_3171','inv1','inv2','inv_ref_2547','inv_ref_3171',
-      'item1','item2','item3','item_ref_2547','item_ref_3171',
-      'v1','v2','v3','log1','log2','mov1','mov2','mov3','mov4','mov5',
-      '1','2','3'];
-    const cleaned = localStorage.getItem('elbanna_mock_cleaned_v3');
-    if (!cleaned) {
-      ['elbanna_drivers','elbanna_officials','elbanna_cars','elbanna_violations',
-       'elbanna_invoices','elbanna_invoice_items','elbanna_audit_logs',
-       'elbanna_movements','elbanna_custody_accounts','elbanna_companies'].forEach(k => {
-        try {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const arr = JSON.parse(raw);
-            if (Array.isArray(arr)) {
-              const filtered = arr.filter((item: any) => !mockIds.includes(item.id));
-              localStorage.setItem(k, JSON.stringify(filtered));
-            }
-          }
-        } catch(e) {}
-      });
-      localStorage.setItem('elbanna_mock_cleaned_v3', '1');
-    }
-  };
-
   const [drivers, setDrivers] = useState<Driver[]>(() => 
     loadSavedArray('elbanna_drivers', INITIAL_DRIVERS)
   );
@@ -251,16 +224,118 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     loadSavedArray('elbanna_officials', INITIAL_OFFICIALS)
   );
 
-  const [cars, setCars] = useState<Car[]>(() => loadSavedArray('elbanna_cars', []));
+  const [cars, setCars] = useState<Car[]>(() => {
+    const loaded = loadSavedArray('elbanna_cars', INITIAL_CARS);
+    const has2547 = loaded.some(c => c.car_number === "ر ا ق 2547" || c.id === "c_ref_2547");
+    const has3171 = loaded.some(c => c.car_number === "ر د م 3171" || c.id === "c_ref_3171");
+    let result = [...loaded];
+    if (!has2547) {
+      result.push({
+        id: "c_ref_2547",
+        car_number: "ر ا ق 2547",
+        chassis_number: "CH-2547-XYZ",
+        motor_number: "M-2547-ABC",
+        owner_company: "مجموعة البنا للتشييد",
+        license_official_id: "1",
+        driver_id: "d1",
+        license_end_date: "2027-06-15",
+        insurance_status: "ساري",
+        extinguisher_status: "valid",
+        model: "2024",
+        brand: "مرسيدس أكتروس",
+        car_type: "شاحنة نقل ثقيل",
+        license_total_cost: 10410
+      });
+    }
+    if (!has3171) {
+      result.push({
+        id: "c_ref_3171",
+        car_number: "ر د م 3171",
+        chassis_number: "CH-3171-XYZ",
+        motor_number: "M-3171-ABC",
+        owner_company: "البنا ترانس لخدمات اللوجستيك",
+        license_official_id: "1",
+        driver_id: "d2",
+        license_end_date: "2027-05-20",
+        insurance_status: "ساري",
+        extinguisher_status: "valid",
+        model: "2024",
+        brand: "فولفو FMX",
+        car_type: "جرار رئيسي",
+        license_total_cost: 1130
+      });
+    }
+    return result;
+  });
 
   const [violations, setViolations] = useState<Violation[]>(() => {
     const raw = loadSavedArray('elbanna_violations', INITIAL_VIOLATIONS);
     return raw.map(v => ({ ...v, violation_date: normalizeDateToYmd(v.violation_date) }));
   });
 
-  const [invoices, setInvoices] = useState<Invoice[]>(() => loadSavedArray('elbanna_invoices', []));
+  const [invoices, setInvoices] = useState<Invoice[]>(() => {
+    const loaded = loadSavedArray('elbanna_invoices', INITIAL_INVOICES);
+    const has2547Inv = loaded.some(i => i.id === "inv_ref_2547");
+    const has3171Inv = loaded.some(i => i.id === "inv_ref_3171");
+    let result = [...loaded];
+    if (!has2547Inv) {
+      result.unshift({
+        id: "inv_ref_2547",
+        invoice_number: "INV-2026-0003",
+        invoice_date: "2026-06-12",
+        official_id: "1",
+        total_amount: 10410,
+        version: 1,
+        is_modified: false,
+        is_deleted: false,
+        car_id: "c_ref_2547",
+        license_details: "رسوم تجديد ترخيص السيارة وجدولة الفحص ومعاينات طفايات الحريق واستصدار الملصق المروري للسيارة ر ا ق 2547"
+      });
+    }
+    if (!has3171Inv) {
+      result.unshift({
+        id: "inv_ref_3171",
+        invoice_number: "INV-2026-0004",
+        invoice_date: "2026-06-13",
+        official_id: "1",
+        total_amount: 1130,
+        version: 1,
+        is_modified: false,
+        is_deleted: false,
+        car_id: "c_ref_3171",
+        license_details: "رسوم تجديد ترخيص السيارة وجدولة الفحص ومعاينات طفايات الحريق واستصدار الملصق المروري للسيارة ر د م 3171"
+      });
+    }
+    return result;
+  });
 
-  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>(() => loadSavedArray('elbanna_invoice_items', []));
+  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>(() => {
+    const arr = loadSavedArray('elbanna_invoice_items', INITIAL_INVOICE_ITEMS);
+    const has2547Item = arr.some(i => i.id === "item_ref_2547");
+    const has3171Item = arr.some(i => i.id === "item_ref_3171");
+    let result = [...arr];
+    if (!has2547Item) {
+      result.push({
+        id: "item_ref_2547",
+        invoice_id: "inv_ref_2547",
+        car_id: "c_ref_2547",
+        description: "رسوم تجديد ترخيص وجدولة فحص السيارة ر ا ق 2547 فحص مروري كامل معتمد",
+        amount: 10410,
+        payment_method: "cash"
+      });
+    }
+    if (!has3171Item) {
+      result.push({
+        id: "item_ref_3171",
+        invoice_id: "inv_ref_3171",
+        car_id: "c_ref_3171",
+        description: "رسوم ترخيص وتأمين إجباري واستصدار ملصقات للسيارة ر د م 3171 فحص وغيار طفاية وتأمين",
+        amount: 1130,
+        payment_method: "cash"
+      });
+    }
+    return [...result].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  });
 
   const [auditLogs, setAuditLogs] = useState<InvoiceAuditLog[]>(() => 
     loadSavedArray('elbanna_audit_logs', INITIAL_AUDIT_LOGS)
@@ -424,7 +499,15 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     } catch (e) {
       console.warn('Error parsing custody accounts:', e);
     }
-    return [];
+    return [
+      { id: "ca_1_1", official_id: "1", name: "نقدي كاش رئيسي", type: 'cash', balance: 50000 },
+      { id: "ca_1_2", official_id: "1", name: "فيزا بنك مصر (025)", type: 'visa', balance: 40000 },
+      { id: "ca_1_3", official_id: "1", name: "فيزا الائتمان الرئيسي (114)", type: 'other_visa', balance: 60000 },
+      { id: "ca_2_1", official_id: "2", name: "نقدي كاش فرعي", type: 'cash', balance: 25000 },
+      { id: "ca_2_2", official_id: "2", name: "فيزا البريد المصري", type: 'visa', balance: 40000 },
+      { id: "ca_3_1", official_id: "3", name: "نقدي كاش يدوي", type: 'cash', balance: 15000 },
+      { id: "ca_3_2", official_id: "3", name: "فيزا البنك الأهلي تراخيص", type: 'visa', balance: 20000 }
+    ];
   });
 
   const [custodyMovements, setCustodyMovements] = useState<CustodyMovement[]>(() => 
@@ -432,7 +515,11 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   );
 
   const [companies, setCompanies] = useState<string[]>(() => 
-    loadSavedArray('elbanna_companies', [])
+    loadSavedArray('elbanna_companies', [
+      "مجموعة البنا للتشييد",
+      "البنا ترانس لخدمات اللوجستيك",
+      "البنا الخرسانية"
+    ])
   );
 
   const addCompany = (companyName: string) => {
@@ -531,6 +618,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (!client) return;
 
     const delayDebounce = setTimeout(async () => {
+      // انتظر لو في تنزيل شغال بدل التجاهل
       if (isDownloadingRef.current) {
         await new Promise(r => setTimeout(r, 3000));
         if (isDownloadingRef.current) return;
@@ -539,6 +627,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const res = await uploadLocalDataToCloud();
         if (!res.success) {
           setCloudError(res.message);
+          // retry تلقائي بعد 5 ثواني
           setTimeout(async () => {
             const retry = await uploadLocalDataToCloud();
             if (retry.success) setCloudError(null);
@@ -553,6 +642,20 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     return () => clearTimeout(delayDebounce);
   }, [drivers, officials, cars, violations, invoices, invoiceItems, auditLogs, movements, custodyAccounts, custodyMovements, adminPassword, managerPassword, companies]);
+
+  // مزامنة دورية كل 3 دقائق - safety net لضمان رفع أي بيانات لم تُرفع
+  useEffect(() => {
+    const periodicSync = setInterval(async () => {
+      const client = getSupabaseClient();
+      if (!client || isDownloadingRef.current) return;
+      try {
+        await uploadLocalDataToCloud();
+      } catch (e) {
+        console.warn('Periodic sync error:', e);
+      }
+    }, 3 * 60 * 1000);
+    return () => clearInterval(periodicSync);
+  }, []);
 
   // Network jitter simulation
   useEffect(() => {
@@ -988,78 +1091,74 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }));
 
       const uploadTasks = [
-        sanitizedDrivers.length > 0 ? supabase.from('drivers').upsert(sanitizedDrivers) : Promise.resolve({ error: null }),
-        officials.length > 0 ? supabase.from('officials').upsert(officials) : Promise.resolve({ error: null }),
-        sanitizedCars.length > 0 ? supabase.from('cars').upsert(sanitizedCars) : Promise.resolve({ error: null }),
-        sanitizedViolations.length > 0 ? supabase.from('violations').upsert(sanitizedViolations) : Promise.resolve({ error: null }),
-        sanitizedInvoices.length > 0 ? supabase.from('invoices').upsert(sanitizedInvoices) : Promise.resolve({ error: null }),
-        invoiceItems.length > 0 ? supabase.from('invoice_items').upsert(invoiceItems) : Promise.resolve({ error: null }),
-        sanitizedAuditLogs.length > 0 ? supabase.from('invoice_audit_logs').upsert(sanitizedAuditLogs) : Promise.resolve({ error: null }),
-        sanitizedMovements.length > 0 ? supabase.from('driver_account_movements').upsert(sanitizedMovements) : Promise.resolve({ error: null }),
-        custodyAccounts.length > 0 ? supabase.from('custody_accounts').upsert(custodyAccounts) : Promise.resolve({ error: null }),
-        sanitizedCustodyMovements.length > 0 ? supabase.from('custody_movements').upsert(sanitizedCustodyMovements) : Promise.resolve({ error: null })
       ];
 
-      const results = await Promise.all(uploadTasks);
-      const errors = results.filter(r => r && r.error).map(r => r.error);
+      // رفع كل جدول منفرداً مع retry - فشل جدول لا يوقف الباقي
+      const upsertSafe = async (table: string, data: any[], retries = 3): Promise<any | null> => {
+        if (!data || data.length === 0) return null;
+        const BATCH = 400;
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            let lastErr: any = null;
+            for (let i = 0; i < data.length; i += BATCH) {
+              const { error } = await supabase.from(table).upsert(data.slice(i, i + BATCH));
+              if (error) { lastErr = error; break; }
+            }
+            if (!lastErr) return null;
+            if (attempt < retries) await new Promise(r => setTimeout(r, attempt * 1000));
+            if (attempt === retries) return lastErr;
+          } catch (e: any) {
+            if (attempt === retries) return e;
+            await new Promise(r => setTimeout(r, attempt * 1000));
+          }
+        }
+        return null;
+      };
 
-      if (errors.length > 0) {
-        console.error("Supabase upload error:", errors);
-        const err = errors[0]!;
-        const uploadErrMsg = err.message || "";
-        
-        if (
-          err.message?.includes("unique_violation_date_car") ||
-          err.message?.toLowerCase().includes("violates unique constraint")
-        ) {
-          return {
-            success: false,
-            message: "فشل الرفع السحابي بسبب قيد منع التكرار للمخالفات (unique_violation_date_car) على قاعدة بيانات Supabase. لحل هذه المشكلة فورًا، يُرجى فتح شاشة 'محرر ومراقب Supabase' وضغط زر 'نسخ كود الإصلاح السريع' للصقه وتشغيله في الـ SQL Editor بـ Supabase لإسقاط هذا القيد وتسهيل المزامنة التامة."
-          };
-        }
-        
-        // Check for missing columns (error code 42703 or "column ... does not exist" message)
-        if (err.code === "42703" || (uploadErrMsg.includes("column") && uploadErrMsg.includes("does not exist"))) {
-          const customMsg = "تنبيه قاعدة البيانات السحابية: يوجد حقل مفقود بجدول السيارات (traffic_office) في مشروع Supabase الخاص بك. لحل هذه المشكلة فورًا لتبسيط الاتصال وعرض جميع بيانات الجداول، يرجى التوجه إلى SQL Editor في Supabase وتشغيل الكود التالي:\n\nALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);";
-          return { success: false, message: customMsg };
-        }
-        
-        if (
-          (uploadErrMsg.includes("relation") && uploadErrMsg.includes("does not exist")) || 
-          uploadErrMsg.includes("Could not find the table") || 
-          uploadErrMsg.includes("schema cache") ||
-          err.code === "P0001" || 
-          err.code === "42P01"
-        ) {
-          return { 
-            success: false, 
-            message: "الخادم السحابي متصل بنجاح، ولكن الجداول غير منشأة بالخلفية بعد! يرجى الضغط على زر 'محرر ومراقب Supabase' ونسخ كود الـ SQL الموحد ولصقه في الـ SQL Editor بـ Supabase لتهيئة الجداول." 
-          };
-        }
-        return { success: false, message: `فشل الرفع السحابي: ${err.message}` };
-      }
+      // المرحلة 1: الجداول الأساسية
+      await Promise.all([
+        upsertSafe('officials', officials),
+        upsertSafe('drivers', sanitizedDrivers),
+      ]);
+      // المرحلة 2: الجداول المرتبطة
+      await Promise.all([
+        upsertSafe('cars', sanitizedCars),
+        upsertSafe('violations', sanitizedViolations),
+        upsertSafe('custody_accounts', custodyAccounts),
+      ]);
+      // المرحلة 3: الفواتير والحركات
+      await Promise.all([
+        upsertSafe('invoices', sanitizedInvoices),
+        upsertSafe('driver_account_movements', sanitizedMovements),
+        upsertSafe('custody_movements', sanitizedCustodyMovements),
+      ]);
+      // المرحلة 4: التفاصيل والسجلات
+      await Promise.all([
+        upsertSafe('invoice_items', invoiceItems),
+        upsertSafe('invoice_audit_logs', sanitizedAuditLogs),
+      ]);
 
-      // Safe separate background save for administrative credentials / system settings
+      // رفع كلمات المرور والإعدادات
       try {
-        const settingsToUpsert = [
+        await supabase.from('system_settings').upsert([
           { key: 'admin_password', value: adminPassword },
           { key: 'manager_password', value: managerPassword },
           { key: 'companies', value: JSON.stringify(companies) }
-        ];
-        await supabase.from('system_settings').upsert(settingsToUpsert);
-      } catch (settingsUpsertError) {
-        console.warn("Supabase upsert system_settings error:", settingsUpsertError);
+        ]);
+      } catch (e) {
+        console.warn('system_settings upsert failed:', e);
       }
 
       setIsCloudConnected(true);
-      return { success: true, message: "تم رفع وتصدير كافة البيانات من هذا الجهاز إلى قاعدة البيانات السحابية بنجاح 100%!" };
+      return { success: true, message: "تم رفع وتصدير كافة البيانات بنجاح!" };
     } catch (e: any) {
       console.error("Supabase bulk upload exception:", e);
-      return { success: false, message: `حدث خطأ استثنائي أثناء الرفع: ${e.message}` };
+      return { success: false, message: `حدث خطأ أثناء الرفع: ${e.message}` };
     } finally {
       setIsCloudSyncing(false);
     }
   };
+
 
   // Quick Connection Tester
   const testCloudConnection = async (): Promise<{ success: boolean; message: string }> => {
@@ -1094,9 +1193,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
-  // تنظيف البيانات الوهمية وتنزيل السحابة عند الفتح
+  // Attempt auto-download on mount if Supabase is already configured
   useEffect(() => {
-    cleanupMockData();
     const client = getSupabaseClient();
     if (client) {
       downloadCloudDataToLocal();

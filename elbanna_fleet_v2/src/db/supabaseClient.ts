@@ -2,12 +2,12 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 export const getSupabaseConfig = () => {
   const meta: any = import.meta;
-  const dbUrlFallback = 'https://jqnircagivrnvsljvxau.supabase.co';
-  const dbKeyFallback = 'sb_publishable_0LUMSN7RBGE1bIbWjXYI-Q_mpenQd59';
-
-  // تنظيف أي config قديم
+  const dbUrlFallback = 'https://zudptuecpxjcwrepynss.supabase.co';
+  const dbKeyFallback = 'sb_publishable_d0366-21ngHHwytJn9nBnw_E0gGnOcM';
+  
+  // Auto-upgrade client if they are stored with the old URL
   const storedUrl = localStorage.getItem('elbanna_supabase_url');
-  if (storedUrl && storedUrl.includes('zudptuecpxjcwrepynss')) {
+  if (storedUrl && (storedUrl.includes('jqnircagivrnvsljvxau') || storedUrl.trim() === '')) {
     localStorage.removeItem('elbanna_supabase_url');
     localStorage.removeItem('elbanna_supabase_key');
   }
@@ -37,14 +37,16 @@ export const getSupabaseClient = (): SupabaseClient | null => {
     clientInstance = null;
     return null;
   }
-
+  
   if (clientInstance && url === lastUsedUrl && key === lastUsedKey) {
     return clientInstance;
   }
-
+  
   try {
     clientInstance = createClient(url, key, {
-      auth: { persistSession: false }
+      auth: {
+        persistSession: false
+      }
     });
     lastUsedUrl = url;
     lastUsedKey = key;
