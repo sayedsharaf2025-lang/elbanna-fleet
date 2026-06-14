@@ -617,26 +617,28 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const client = getSupabaseClient();
     if (!client) return;
 
-    if (isDownloadingRef.current) {
-      console.log("Auto-upload bypassed because downloading is active.");
-      return;
-    }
-
     const delayDebounce = setTimeout(async () => {
-      console.log("Triggering silent auto-upload of updated local data to Supabase...");
+      // انتظر لو في تنزيل شغال بدل التجاهل
+      if (isDownloadingRef.current) {
+        await new Promise(r => setTimeout(r, 3000));
+        if (isDownloadingRef.current) return;
+      }
       try {
         const res = await uploadLocalDataToCloud();
         if (!res.success) {
-          console.warn("Silent auto-upload failed:", res.message);
           setCloudError(res.message);
+          // retry تلقائي بعد 5 ثواني
+          setTimeout(async () => {
+            const retry = await uploadLocalDataToCloud();
+            if (retry.success) setCloudError(null);
+          }, 5000);
         } else {
           setCloudError(null);
         }
       } catch (err: any) {
-        console.error("Auto-upload background error:", err);
-        setCloudError(err.message || "حدث خطأ غير متوقع أثناء المزامنة التلقائية بالخلفية.");
+        console.error("Auto-upload error:", err);
       }
-    }, 1500); // 1.5 seconds debounce to batch fast inputs (like imports or multiple rapid entries)
+    }, 1500);
 
     return () => clearTimeout(delayDebounce);
   }, [drivers, officials, cars, violations, invoices, invoiceItems, auditLogs, movements, custodyAccounts, custodyMovements, adminPassword, managerPassword, companies]);
@@ -940,9 +942,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return { success: false, message: `حدث خطأ بالاتصال: ${e.message}` };
     } finally {
       setIsCloudSyncing(false);
-      setTimeout(() => {
-        isDownloadingRef.current = false;
-      }, 1000);
+      isDownloadingRef.current = false;
     }
   };
 
