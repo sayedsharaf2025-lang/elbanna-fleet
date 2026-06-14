@@ -224,118 +224,22 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     loadSavedArray('elbanna_officials', INITIAL_OFFICIALS)
   );
 
-  const [cars, setCars] = useState<Car[]>(() => {
-    const loaded = loadSavedArray('elbanna_cars', INITIAL_CARS);
-    const has2547 = loaded.some(c => c.car_number === "ر ا ق 2547" || c.id === "c_ref_2547");
-    const has3171 = loaded.some(c => c.car_number === "ر د م 3171" || c.id === "c_ref_3171");
-    let result = [...loaded];
-    if (!has2547) {
-      result.push({
-        id: "c_ref_2547",
-        car_number: "ر ا ق 2547",
-        chassis_number: "CH-2547-XYZ",
-        motor_number: "M-2547-ABC",
-        owner_company: "مجموعة البنا للتشييد",
-        license_official_id: "1",
-        driver_id: "d1",
-        license_end_date: "2027-06-15",
-        insurance_status: "ساري",
-        extinguisher_status: "valid",
-        model: "2024",
-        brand: "مرسيدس أكتروس",
-        car_type: "شاحنة نقل ثقيل",
-        license_total_cost: 10410
-      });
-    }
-    if (!has3171) {
-      result.push({
-        id: "c_ref_3171",
-        car_number: "ر د م 3171",
-        chassis_number: "CH-3171-XYZ",
-        motor_number: "M-3171-ABC",
-        owner_company: "البنا ترانس لخدمات اللوجستيك",
-        license_official_id: "1",
-        driver_id: "d2",
-        license_end_date: "2027-05-20",
-        insurance_status: "ساري",
-        extinguisher_status: "valid",
-        model: "2024",
-        brand: "فولفو FMX",
-        car_type: "جرار رئيسي",
-        license_total_cost: 1130
-      });
-    }
-    return result;
-  });
+  const [cars, setCars] = useState<Car[]>(() => 
+    loadSavedArray('elbanna_cars', INITIAL_CARS)
+  );
 
   const [violations, setViolations] = useState<Violation[]>(() => {
     const raw = loadSavedArray('elbanna_violations', INITIAL_VIOLATIONS);
     return raw.map(v => ({ ...v, violation_date: normalizeDateToYmd(v.violation_date) }));
   });
 
-  const [invoices, setInvoices] = useState<Invoice[]>(() => {
-    const loaded = loadSavedArray('elbanna_invoices', INITIAL_INVOICES);
-    const has2547Inv = loaded.some(i => i.id === "inv_ref_2547");
-    const has3171Inv = loaded.some(i => i.id === "inv_ref_3171");
-    let result = [...loaded];
-    if (!has2547Inv) {
-      result.unshift({
-        id: "inv_ref_2547",
-        invoice_number: "INV-2026-0003",
-        invoice_date: "2026-06-12",
-        official_id: "1",
-        total_amount: 10410,
-        version: 1,
-        is_modified: false,
-        is_deleted: false,
-        car_id: "c_ref_2547",
-        license_details: "رسوم تجديد ترخيص السيارة وجدولة الفحص ومعاينات طفايات الحريق واستصدار الملصق المروري للسيارة ر ا ق 2547"
-      });
-    }
-    if (!has3171Inv) {
-      result.unshift({
-        id: "inv_ref_3171",
-        invoice_number: "INV-2026-0004",
-        invoice_date: "2026-06-13",
-        official_id: "1",
-        total_amount: 1130,
-        version: 1,
-        is_modified: false,
-        is_deleted: false,
-        car_id: "c_ref_3171",
-        license_details: "رسوم تجديد ترخيص السيارة وجدولة الفحص ومعاينات طفايات الحريق واستصدار الملصق المروري للسيارة ر د م 3171"
-      });
-    }
-    return result;
-  });
+  const [invoices, setInvoices] = useState<Invoice[]>(() => 
+    loadSavedArray('elbanna_invoices', INITIAL_INVOICES)
+  );
 
-  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>(() => {
-    const arr = loadSavedArray('elbanna_invoice_items', INITIAL_INVOICE_ITEMS);
-    const has2547Item = arr.some(i => i.id === "item_ref_2547");
-    const has3171Item = arr.some(i => i.id === "item_ref_3171");
-    let result = [...arr];
-    if (!has2547Item) {
-      result.push({
-        id: "item_ref_2547",
-        invoice_id: "inv_ref_2547",
-        car_id: "c_ref_2547",
-        description: "رسوم تجديد ترخيص وجدولة فحص السيارة ر ا ق 2547 فحص مروري كامل معتمد",
-        amount: 10410,
-        payment_method: "cash"
-      });
-    }
-    if (!has3171Item) {
-      result.push({
-        id: "item_ref_3171",
-        invoice_id: "inv_ref_3171",
-        car_id: "c_ref_3171",
-        description: "رسوم ترخيص وتأمين إجباري واستصدار ملصقات للسيارة ر د م 3171 فحص وغيار طفاية وتأمين",
-        amount: 1130,
-        payment_method: "cash"
-      });
-    }
-    return [...result].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  });
+  const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>(() => 
+    loadSavedArray('elbanna_invoice_items', INITIAL_INVOICE_ITEMS)
+  );
 
   const [auditLogs, setAuditLogs] = useState<InvoiceAuditLog[]>(() => 
     loadSavedArray('elbanna_audit_logs', INITIAL_AUDIT_LOGS)
@@ -499,15 +403,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     } catch (e) {
       console.warn('Error parsing custody accounts:', e);
     }
-    return [
-      { id: "ca_1_1", official_id: "1", name: "نقدي كاش رئيسي", type: 'cash', balance: 50000 },
-      { id: "ca_1_2", official_id: "1", name: "فيزا بنك مصر (025)", type: 'visa', balance: 40000 },
-      { id: "ca_1_3", official_id: "1", name: "فيزا الائتمان الرئيسي (114)", type: 'other_visa', balance: 60000 },
-      { id: "ca_2_1", official_id: "2", name: "نقدي كاش فرعي", type: 'cash', balance: 25000 },
-      { id: "ca_2_2", official_id: "2", name: "فيزا البريد المصري", type: 'visa', balance: 40000 },
-      { id: "ca_3_1", official_id: "3", name: "نقدي كاش يدوي", type: 'cash', balance: 15000 },
-      { id: "ca_3_2", official_id: "3", name: "فيزا البنك الأهلي تراخيص", type: 'visa', balance: 20000 }
-    ];
+    return [];
   });
 
   const [custodyMovements, setCustodyMovements] = useState<CustodyMovement[]>(() => 
@@ -515,11 +411,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   );
 
   const [companies, setCompanies] = useState<string[]>(() => 
-    loadSavedArray('elbanna_companies', [
-      "مجموعة البنا للتشييد",
-      "البنا ترانس لخدمات اللوجستيك",
-      "البنا الخرسانية"
-    ])
+    loadSavedArray('elbanna_companies', [])
   );
 
   const addCompany = (companyName: string) => {
@@ -2588,3 +2480,92 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         invoices,
         invoiceItems,
         auditLogs,
+        movements,
+        custodyAccounts,
+        custodyMovements
+      }
+    };
+    return JSON.stringify(backupObj, null, 2);
+  };
+
+  const importLocalBackup = (jsonData: string): { success: boolean; message: string } => {
+    try {
+      const parsed = JSON.parse(jsonData);
+      if (!parsed || parsed.app !== "elbanna_fleet_management" || !parsed.data) {
+        return { success: false, message: "صيغة ملف النسخة الاحتياطية غير صالحة أو غير متوافقة." };
+      }
+
+      const {
+        drivers: importedDrivers,
+        officials: importedOfficials,
+        cars: importedCars,
+        violations: importedViolations,
+        invoices: importedInvoices,
+        invoiceItems: importedInvoiceItems,
+        auditLogs: importedAuditLogs,
+        movements: importedMovements,
+        custodyAccounts: importedCustodyAccounts,
+        custodyMovements: importedCustodyMovements
+      } = parsed.data;
+
+      if (
+        !Array.isArray(importedDrivers) ||
+        !Array.isArray(importedOfficials) ||
+        !Array.isArray(importedCars) ||
+        !Array.isArray(importedViolations) ||
+        !Array.isArray(importedInvoices)
+      ) {
+        return { success: false, message: "البيانات داخل ملف النسخة الاحتياطية تالفة أو ناقصة." };
+      }
+
+      setDrivers(importedDrivers);
+      setOfficials(importedOfficials);
+      setCars(importedCars);
+      setViolations(importedViolations);
+      setInvoices(importedInvoices);
+      if (Array.isArray(importedInvoiceItems)) {
+        const sorted = [...importedInvoiceItems].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        setInvoiceItems(sorted);
+      }
+      if (Array.isArray(importedAuditLogs)) setAuditLogs(importedAuditLogs);
+      if (Array.isArray(importedMovements)) setMovements(importedMovements);
+      if (Array.isArray(importedCustodyAccounts)) setCustodyAccounts(importedCustodyAccounts);
+      if (Array.isArray(importedCustodyMovements)) setCustodyMovements(importedCustodyMovements);
+
+      localStorage.setItem('elbanna_drivers', JSON.stringify(importedDrivers));
+      localStorage.setItem('elbanna_officials', JSON.stringify(importedOfficials));
+      localStorage.setItem('elbanna_cars', JSON.stringify(importedCars));
+      localStorage.setItem('elbanna_violations', JSON.stringify(importedViolations));
+      localStorage.setItem('elbanna_invoices', JSON.stringify(importedInvoices));
+      if (Array.isArray(importedInvoiceItems)) localStorage.setItem('elbanna_invoice_items', JSON.stringify(importedInvoiceItems));
+      if (Array.isArray(importedAuditLogs)) localStorage.setItem('elbanna_audit_logs', JSON.stringify(importedAuditLogs));
+      if (Array.isArray(importedMovements)) localStorage.setItem('elbanna_movements', JSON.stringify(importedMovements));
+      if (Array.isArray(importedCustodyAccounts)) localStorage.setItem('elbanna_custody_accounts', JSON.stringify(importedCustodyAccounts));
+      if (Array.isArray(importedCustodyMovements)) localStorage.setItem('elbanna_custody_movements', JSON.stringify(importedCustodyMovements));
+
+      return { success: true, message: "تم تحميل واستيراد النسخة الاحتياطية بنجاح وتحديث كافة السجلات محلياً!" };
+    } catch (e: any) {
+      console.error("Backup import error:", e);
+      return { success: false, message: `فشل استيراد النسخة الاحتياطية: ${e.message || e}` };
+    }
+  };
+
+  // استيراد فاتورة قديمة (PDF) بدون خصم من العهدة
+  const importOldInvoice = (data: {
+    external_invoice_number: string;
+    invoice_date: string;
+    car_number: string;
+    license_location: string;
+    license_details: string;
+    items: { description: string; amount: number }[];
+    total_amount: number;
+  }): { success: boolean; error?: string; invoice?: Invoice } => {
+    // إيجاد السيارة من رقمها
+    const car = cars.find(c => c.car_number.includes(data.car_number) || c.car_number === data.car_number);
+    if (!car) {
+      return { success: false, error: `لم يتم العثور على سيارة برقم "${data.car_number}"` };
+    }
+
+    // إيجاد المسؤول من السيارة
+    const official = officials.find(o => o.id === car.license_official_id);
+    const officialId = (currentUs
