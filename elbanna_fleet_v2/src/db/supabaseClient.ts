@@ -2,12 +2,12 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 export const getSupabaseConfig = () => {
   const meta: any = import.meta;
-  const dbUrlFallback = 'https://zudptuecpxjcwrepynss.supabase.co';
-  const dbKeyFallback = 'sb_publishable_d0366-21ngHHwytJn9nBnw_E0gGnOcM';
-  
-  // Auto-upgrade client if they are stored with the old URL
+  const dbUrlFallback = 'https://jqnircagivrnvsljvxau.supabase.co';
+  const dbKeyFallback = 'sb_publishable_0LUMSN7RBGE1bIbWjXYI-Q_mpenQd59';
+
+  // Auto-upgrade: clear the OLD wrong project URL if still stored
   const storedUrl = localStorage.getItem('elbanna_supabase_url');
-  if (storedUrl && (storedUrl.includes('jqnircagivrnvsljvxau') || storedUrl.trim() === '')) {
+  if (storedUrl && storedUrl.includes('zudptuecpxjcwrepynss')) {
     localStorage.removeItem('elbanna_supabase_url');
     localStorage.removeItem('elbanna_supabase_key');
   }
