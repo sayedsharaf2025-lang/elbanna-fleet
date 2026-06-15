@@ -362,29 +362,44 @@ export const PdfInvoiceImport: React.FC = () => {
               {db.cars.map(c => <option key={c.id} value={c.car_number} />)}
             </datalist>
 
-            {/* سحب نوع السيارة تلقائياً من السيستم */}
+            {/* ربط السيارة بالأرقام + التنبيه */}
             {form.car_number && (() => {
-              const carObj = db.cars.find(c => c.car_number === form.car_number || c.car_number.includes(form.car_number));
+              const inputDigits = form.car_number.match(/\d+/)?.[0];
+              const exactMatch = db.cars.find(c => c.car_number.replace(/\s/g,'') === form.car_number.replace(/\s/g,''));
+              const digitMatch = !exactMatch && inputDigits
+                ? db.cars.find(c => c.car_number.match(/\d+/)?.[0] === inputDigits)
+                : null;
+              const carObj = exactMatch || digitMatch;
+              const isDigitOnly = !exactMatch && !!digitMatch;
               return (
-                <div className="mt-1.5 p-1 px-2 rounded bg-slate-950/60 border border-slate-850 text-[10px] text-slate-400">
-                  🚘 نوع السيارة المسجل بالنظام: {" "}
-                  <strong className="text-emerald-400">{carObj ? carObj.car_type || 'غير محدد' : 'غير مسجلة'}</strong>
-                  {carObj && carObj.brand && <span className="text-slate-500"> ({carObj.brand} - {carObj.model})</span>}
+                <div className={`mt-1.5 p-2 px-3 rounded-lg border text-[11px] space-y-1 ${isDigitOnly ? 'bg-amber-500/10 border-amber-500/30' : carObj ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+                  {carObj ? (
+                    <>
+                      <p className={`font-bold ${isDigitOnly ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        {isDigitOnly ? '⚠️ وُجدت بالأرقام فقط' : '✅ مطابقة تامة'} — {carObj.car_number}
+                      </p>
+                      <p className="text-slate-300">🚘 {carObj.car_type || ''} {carObj.brand || ''} {carObj.model || ''}</p>
+                      {carObj.traffic_office && <p className="text-slate-400">📍 مكان الترخيص: <strong className="text-sky-400">{carObj.traffic_office}</strong></p>}
+                      {isDigitOnly && <p className="text-amber-300 text-[10px]">يُنصح بإضافة حروف السيارة في صفحة السيارات والسائقين</p>}
+                    </>
+                  ) : (
+                    <p className="text-red-400 font-bold">❌ السيارة غير مسجلة في النظام</p>
+                  )}
                 </div>
               );
             })()}
           </div>
           <div>
-            <label className="block text-slate-400 font-bold mb-1">مكان السيارة المرفق بالفاتورة (مثال: منياالقمح) *</label>
+            <label className="block text-slate-400 font-bold mb-1">مكان الخدمة / تواجد السيارة الحالي *</label>
             <input
-              type="text" placeholder="مثال: حملة منياالقمح"
+              type="text" placeholder="مثال: حملة منياالقمح — يُستخرج من الفاتورة تلقائياً"
               className="w-full rounded-lg px-3 py-2 bg-slate-950 border border-slate-850 focus:outline-none focus:border-indigo-500"
               value={form.license_location}
               onChange={e => setForm(p => ({ ...p, license_location: e.target.value }))}
             />
           </div>
           <div className="sm:col-span-2">
-            <label className="block text-slate-400 font-bold mb-1">بيان وتفاصيل الترخيص بالفاتورة</label>
+            <label className="block text-slate-400 font-bold mb-1">بيان وتفاصيل الترخيص (يُجلب من بيانات السيارة تلقائياً)</label>
             <input
               type="text" placeholder="مثال: تجديد سنوى"
               className="w-full rounded-lg px-3 py-2 bg-slate-950 border border-slate-850 focus:outline-none focus:border-indigo-500"
