@@ -460,8 +460,8 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);`;
                     <button
                       type="button"
                       onClick={() => {
-                        setUrlInput('https://zudptuecpxjcwrepynss.supabase.co');
-                        setKeyInput('sb_publishable_d0366-21ngHHwytJn9nBnw_E0gGnOcM');
+                        setUrlInput('https://jqnircagivrnvsljvxau.supabase.co');
+                        setKeyInput('sb_publishable_0LUMSN7RBGE1bIbWjXYI-Q_mpenQd59');
                       }}
                       className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 hover:text-emerald-400 hover:border-emerald-500/40 text-[11px] py-2 px-3 rounded-xl transition-all font-bold flex items-center justify-center gap-2 mb-2 cursor-pointer shadow-sm"
                     >
