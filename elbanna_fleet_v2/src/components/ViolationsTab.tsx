@@ -14,11 +14,14 @@ import {
   Download,
   AlertTriangle,
   CheckCircle,
-  HelpCircle
+  HelpCircle,
+  Upload
 } from 'lucide-react';
+import { PdfViolationImport } from './PdfViolationImport';
 
 export const ViolationsTab: React.FC = () => {
   const db = useDb();
+  const [activeSubTab, setActiveSubTab] = useState<'manual' | 'pdf_import'>('manual');
 
   // Form Fields
   const [violationDate, setViolationDate] = useState(new Date().toISOString().split('T')[0]);
@@ -171,6 +174,28 @@ export const ViolationsTab: React.FC = () => {
   return (
     <div className="space-y-6" id="violations_tab" style={{ direction: 'rtl' }}>
       
+      {/* Sub-tab Navigation */}
+      <div className="flex gap-2 border-b border-slate-200 pb-0">
+        <button
+          onClick={() => setActiveSubTab('manual')}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold rounded-t-xl border-b-2 transition-all ${activeSubTab === 'manual' ? 'border-rose-500 text-rose-700 bg-rose-50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          <Plus className="w-3.5 h-3.5" /> تسجيل يدوي
+        </button>
+        <button
+          onClick={() => setActiveSubTab('pdf_import')}
+          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold rounded-t-xl border-b-2 transition-all ${activeSubTab === 'pdf_import' ? 'border-amber-500 text-amber-700 bg-amber-50' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          <Upload className="w-3.5 h-3.5" /> استيراد من PDF
+        </button>
+      </div>
+
+      {/* PDF Import Tab */}
+      {activeSubTab === 'pdf_import' && <PdfViolationImport />}
+
+      {/* Manual Tab content */}
+      {activeSubTab === 'manual' && <>
+
       {/* Toast Alert Notice */}
       {toastMsg.text && (
         <div className={`p-4 rounded-xl border flex items-center gap-3 text-xs md:text-sm animate-pulse ${toastMsg.type === 'success' ? 'bg-emerald-50 border-emerald-400/20 text-emerald-800' : 'bg-amber-50 border-amber-400/20 text-amber-800'}`}>
@@ -427,6 +452,7 @@ export const ViolationsTab: React.FC = () => {
 
       </div>
 
+      </>}
     </div>
   );
 };
