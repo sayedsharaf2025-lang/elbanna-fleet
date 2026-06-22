@@ -322,7 +322,7 @@ export const ReportsTab: React.FC = () => {
     return matchesOfficial && matchesDate && matchesQuery;
   });
 
-  // 5. Driver Deductions Report by Month & Year
+  // 5. Driver Deductions Report by Month & Year (or by date range if startDate/endDate are set)
   const filteredDeductionsReport = enrichedMovements.filter(m => {
     if (m.type !== 'deduction' && m.type !== 'violation') return false;
 
@@ -335,21 +335,28 @@ export const ReportsTab: React.FC = () => {
     // Parse Date YYYY-MM-DD
     const mDate = m.date || '';
     const parts = mDate.split('-'); // e.g. ["2026", "06", "07"]
-    
-    const matchesYear = !deductionsYear || parts[0] === deductionsYear;
-    const matchesMonth = deductionsMonth === 'all' || !deductionsMonth || parts[1] === deductionsMonth;
+
+    // If a date range is specified (startDate/endDate), use it — otherwise fall back to year/month filter
+    let matchesDate: boolean;
+    if (startDate || endDate) {
+      matchesDate = (!startDate || mDate >= startDate) && (!endDate || mDate <= endDate);
+    } else {
+      const matchesYear = !deductionsYear || parts[0] === deductionsYear;
+      const matchesMonth = deductionsMonth === 'all' || !deductionsMonth || parts[1] === deductionsMonth;
+      matchesDate = matchesYear && matchesMonth;
+    }
     
     const matchesQuery = !searchQuery || 
       m.description.includes(searchQuery) ||
       drvCode.includes(searchQuery) ||
       drvName.includes(searchQuery);
 
-    return matchesDriver && matchesYear && matchesMonth && matchesQuery;
+    return matchesDriver && matchesDate && matchesQuery;
   });
 
   const totalDeductionsReportAmount = filteredDeductionsReport.reduce((sum, m) => sum + Math.abs(m.amount_change), 0);
 
-  // Group deductions by driver to satisfy exact columns pattern
+  // Group deductions by driver — show amount deducted IN the filtered period + current remaining balance
   const groupedDeductions = (() => {
     const map = new Map<string, { driverId: string; driverName: string; totalDeducted: number; remainingBalance: number }>();
 
@@ -365,6 +372,7 @@ export const ReportsTab: React.FC = () => {
           driverId: m.driver_id,
           driverName: drv.name,
           totalDeducted: Math.abs(m.amount_change),
+          // drv.balance = current total remaining balance owed by this driver (after ALL deductions)
           remainingBalance: drv.balance,
         });
       }
@@ -1415,13 +1423,11 @@ export const ReportsTab: React.FC = () => {
           <div className="space-y-6">
             <div className="p-4 bg-slate-950 rounded-xl border border-rose-500/10 flex flex-wrap justify-between items-center gap-4">
               <div className="space-y-1">
-                <span className="text-[10px] text-slate-400 font-semibold block">سنة التصفية المحاسبية للعهد</span>
-                <p className="text-sm font-black text-rose-400">{deductionsYear || "كافة السنوات"}</p>
-              </div>
-              <div className="space-y-1">
-                <span className="text-[10px] text-slate-400 font-semibold block">شهر الاستقطاع المستهدف</span>
+                <span className="text-[10px] text-slate-400 font-semibold block">الفترة المحددة</span>
                 <p className="text-sm font-black text-rose-400">
-                  {deductionsMonth === 'all' ? 'كافة شهور السنة' : `شهر رقم (${deductionsMonth})`}
+                  {(startDate || endDate)
+                    ? `${startDate || '---'} إلى ${endDate || '---'}`
+                    : `${deductionsYear || 'كافة السنوات'} — ${deductionsMonth === 'all' ? 'كافة الشهور' : `شهر (${deductionsMonth})`}`}
                 </p>
               </div>
               <div className="space-y-1">
@@ -1429,8 +1435,12 @@ export const ReportsTab: React.FC = () => {
                 <p className="text-sm font-black text-amber-400">{groupedDeductions.length} سائق</p>
               </div>
               <div className="space-y-1">
-                <span className="text-[10px] text-slate-400 font-semibold block">إجمالي مبالغ الخصم المفلترة</span>
+                <span className="text-[10px] text-slate-400 font-semibold block">إجمالي مبالغ الخصم في الفترة</span>
                 <p className="text-sm font-black text-red-500">{totalDeductionsReportAmount.toLocaleString()} ج.م</p>
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] text-slate-400 font-semibold block">إجمالي المتبقي على السائقين</span>
+                <p className="text-sm font-black text-amber-400">{groupedDeductions.reduce((sum, g) => sum + g.remainingBalance, 0).toLocaleString()} ج.م</p>
               </div>
             </div>
 
@@ -1440,8 +1450,8 @@ export const ReportsTab: React.FC = () => {
                   <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
                     <th className="py-3 px-2 text-center w-8">م</th>
                     <th className="py-3 px-3 text-right">اسم السائق</th>
-                    <th className="py-3 px-3 text-left">مبلغ الخصم</th>
-                    <th className="py-3 px-4 text-left">المتبقى له حتى آخر تاريخ الكشف</th>
+                    <th className="py-3 px-3 text-left">المخصوم في الفترة</th>
+                    <th className="py-3 px-4 text-left">المتبقي عليه (الرصيد الحالي)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1451,7 +1461,7 @@ export const ReportsTab: React.FC = () => {
                         <td className="py-3 px-2 font-mono text-center text-slate-500">{i + 1}</td>
                         <td className="py-3 px-3 font-bold text-slate-200">{g.driverName}</td>
                         <td className="py-3 px-3 font-mono font-black text-red-400 text-left">{g.totalDeducted.toLocaleString()} ج.م</td>
-                        <td className="py-3 px-4 font-mono font-black text-rose-500 text-left">{g.remainingBalance.toLocaleString()} ج.م</td>
+                        <td className="py-3 px-4 font-mono font-black text-amber-400 text-left">{g.remainingBalance > 0 ? `${g.remainingBalance.toLocaleString()} ج.م` : '—'}</td>
                       </tr>
                     );
                   })}
@@ -1469,7 +1479,7 @@ export const ReportsTab: React.FC = () => {
                         {totalDeductionsReportAmount.toLocaleString()} ج.م
                       </td>
                       <td className="py-3 px-4 text-left font-mono text-amber-500 text-xs">
-                        رصيد المديونيات المتبقي الإجمالي: {groupedDeductions.reduce((sum, g) => sum + g.remainingBalance, 0).toLocaleString()} ج.م
+                        إجمالي المتبقي على السائقين: {groupedDeductions.reduce((sum, g) => sum + g.remainingBalance, 0).toLocaleString()} ج.م
                       </td>
                     </tr>
                   </tfoot>
@@ -1812,17 +1822,4 @@ export const ReportsTab: React.FC = () => {
           <A5PrintPreview
             type="invoice"
             invoiceData={{
-              invoice: selectedPrintInvoice,
-              items: selectedPrintItems,
-              officialName: officialName,
-              carsMap: carsMap,
-              carsObjMap: carsObjMap
-            }}
-            onClose={() => setPrintInvoiceId(null)}
-          />
-        );
-      })()}
-      
-    </div>
-  );
-};
+              invoice: 
