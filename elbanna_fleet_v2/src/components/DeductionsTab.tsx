@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { useDb } from '../db/store';
-import { Driver } from '../types';
+import { Driver, DriverAccountMovement } from '../types';
 import { A5PrintPreview } from './A5PrintPreview';
 import {
   Coins,
@@ -17,7 +17,13 @@ import {
   CheckCircle2,
   RefreshCw,
   Terminal,
-  Calculator
+  Calculator,
+  Search,
+  Pencil,
+  Trash2,
+  X,
+  Check,
+  History
 } from 'lucide-react';
 
 export const DeductionsTab: React.FC = () => {
@@ -44,6 +50,13 @@ export const DeductionsTab: React.FC = () => {
     amount?: number;
     description?: string;
   } | null>(null);
+
+  // Movements history panel
+  const [showMovementsPanel, setShowMovementsPanel] = useState(false);
+  const [movSearchQuery, setMovSearchQuery] = useState('');
+  const [editingMovId, setEditingMovId] = useState<string | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editDescription, setEditDescription] = useState('');
 
   const [terminalLog, setTerminalLog] = useState<string[]>([]);
 
@@ -212,7 +225,169 @@ export const DeductionsTab: React.FC = () => {
         />
       )}
 
+      {/* Movements History Panel */}
+      {showMovementsPanel && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <History className="w-5 h-5 text-indigo-500" />
+              <h3 className="font-bold text-slate-800 text-sm">سجل حركات الخصومات — بحث وتعديل وحذف</h3>
+            </div>
+            <button onClick={() => setShowMovementsPanel(false)} className="text-slate-400 hover:text-slate-700 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="ابحث باسم السائق أو البيان..."
+              className="w-full pr-9 pl-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-400 text-slate-800"
+              value={movSearchQuery}
+              onChange={e => setMovSearchQuery(e.target.value)}
+            />
+          </div>
+
+          {/* Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs border-collapse min-w-[680px]">
+              <thead>
+                <tr className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <th className="py-2.5 px-3">السائق</th>
+                  <th className="py-2.5 px-3">التاريخ</th>
+                  <th className="py-2.5 px-3">البيان</th>
+                  <th className="py-2.5 px-3 text-left">المبلغ</th>
+                  <th className="py-2.5 px-3 text-center">إجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const query = movSearchQuery.trim().toLowerCase();
+                  const filtered = db.movements
+                    .filter(m => m.type === 'deduction')
+                    .filter(m => {
+                      if (!query) return true;
+                      const drv = db.drivers.find(d => d.id === m.driver_id);
+                      return (
+                        (drv?.name.toLowerCase().includes(query)) ||
+                        (drv?.driver_code.toLowerCase().includes(query)) ||
+                        m.description.toLowerCase().includes(query)
+                      );
+                    })
+                    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+                  if (filtered.length === 0) return (
+                    <tr><td colSpan={5} className="py-10 text-center text-slate-400">لا توجد حركات خصم مطابقة</td></tr>
+                  );
+
+                  return filtered.map(m => {
+                    const drv = db.drivers.find(d => d.id === m.driver_id);
+                    const isEditing = editingMovId === m.id;
+                    return (
+                      <tr key={m.id} className={`border-b border-slate-100 transition-colors ${isEditing ? 'bg-amber-50' : 'hover:bg-slate-50/80'}`}>
+                        <td className="py-2.5 px-3 font-bold text-slate-800">
+                          <div>{drv?.name || '—'}</div>
+                          <div className="text-[10px] text-slate-400 font-mono">{drv?.driver_code}</div>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-slate-600">{m.date?.substring(0,10)}</td>
+                        <td className="py-2.5 px-3 text-slate-700 max-w-[200px]">
+                          {isEditing ? (
+                            <input
+                              className="w-full border border-amber-300 rounded px-2 py-1 text-xs focus:outline-none focus:border-indigo-400"
+                              value={editDescription}
+                              onChange={e => setEditDescription(e.target.value)}
+                            />
+                          ) : (
+                            <span className="truncate block">{m.description}</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-left">
+                          {isEditing ? (
+                            <input
+                              type="number"
+                              min={1}
+                              className="w-24 border border-amber-300 rounded px-2 py-1 text-xs font-mono font-bold focus:outline-none focus:border-indigo-400"
+                              value={editAmount}
+                              onChange={e => setEditAmount(e.target.value)}
+                            />
+                          ) : (
+                            <span className="font-mono font-bold text-rose-600">{Math.abs(m.amount_change).toLocaleString()} ج.م</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <div className="flex gap-1.5 justify-center">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    if (!editAmount || Number(editAmount) <= 0) return;
+                                    db.editMovementAmount(m.id, Number(editAmount), editDescription);
+                                    setEditingMovId(null);
+                                  }}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors"
+                                >
+                                  <Check className="w-3 h-3" /> حفظ
+                                </button>
+                                <button
+                                  onClick={() => setEditingMovId(null)}
+                                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors"
+                                >
+                                  إلغاء
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    setEditingMovId(m.id);
+                                    setEditAmount(String(Math.abs(m.amount_change)));
+                                    setEditDescription(m.description);
+                                  }}
+                                  className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors"
+                                >
+                                  <Pencil className="w-3 h-3" /> تعديل
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`هل تريد حذف هذا الخصم (${Math.abs(m.amount_change)} ج.م) بشكل نهائي؟ سيتم تعديل رصيد السائق تلقائياً.`)) {
+                                      db.deleteMovement(m.id);
+                                    }
+                                  }}
+                                  className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors"
+                                >
+                                  <Trash2 className="w-3 h-3" /> حذف
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Primary Panels */}
+      {/* Toolbar */}
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-slate-400 font-semibold">
+          {db.movements.filter(m => m.type === 'deduction').length} حركة خصم مسجلة
+        </div>
+        <button
+          onClick={() => { setShowMovementsPanel(v => !v); setMovSearchQuery(''); setEditingMovId(null); }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-sm border ${showMovementsPanel ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'}`}
+        >
+          <History className="w-4 h-4" />
+          {showMovementsPanel ? 'إغلاق سجل الحركات' : 'بحث وتعديل حركات الخصم'}
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* RIGHT COLUMN: ACTION PANEL */}
