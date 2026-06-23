@@ -235,7 +235,7 @@ export const DeductionsTab: React.FC = () => {
                   required
                   className="w-full p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 text-slate-800 font-bold"
                   value={selectedDriverId}
-                  onChange={(e) => setSelectedDriverId(e.target.value)}
+                  onChange={(e) => { setSelectedDriverId(e.target.value); setIndividualCarId(''); }}
                 >
                   <option value="">-- اختر السائق لتسجيل خصمه --</option>
                   {db.drivers.map(d => (
@@ -246,17 +246,37 @@ export const DeductionsTab: React.FC = () => {
 
               <div>
                 <label className="block text-slate-500 font-bold mb-1">السيارة المرتبطة بالخصم / المخالفة</label>
-                <select
-                  required
-                  className="w-full p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 text-slate-800 font-bold bg-white"
-                  value={individualCarId}
-                  onChange={(e) => setIndividualCarId(e.target.value)}
-                >
-                  <option value="">-- اختر لوحة السيارة --</option>
-                  {db.cars.map(c => (
-                    <option key={c.id} value={c.id}>{c.car_number} ({c.owner_company.split(' ')[0]})</option>
-                  ))}
-                </select>
+                {(() => {
+                  // Cars that have violations for the selected driver
+                  const violationCarIds = selectedDriverId
+                    ? [...new Set(db.violations.filter(v => v.driver_id === selectedDriverId).map(v => v.car_number))]
+                    : [];
+                  const violationCars = db.cars.filter(c => violationCarIds.includes(c.car_number));
+                  return (
+                    <select
+                      required
+                      className="w-full p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 text-slate-800 font-bold bg-white"
+                      value={individualCarId}
+                      onChange={(e) => setIndividualCarId(e.target.value)}
+                    >
+                      <option value="">
+                        {!selectedDriverId
+                          ? '-- اختر السائق أولاً --'
+                          : violationCars.length === 0
+                            ? '-- لا توجد مخالفات مسجلة لهذا السائق --'
+                            : '-- اختر سيارة المخالفة --'}
+                      </option>
+                      {violationCars.map(c => {
+                        const violCount = db.violations.filter(v => v.driver_id === selectedDriverId && v.car_number === c.car_number).length;
+                        return (
+                          <option key={c.id} value={c.id}>
+                            {c.car_number} — {violCount} مخالفة
+                          </option>
+                        );
+                      })}
+                    </select>
+                  );
+                })()}
               </div>
 
               <div>
@@ -394,17 +414,29 @@ export const DeductionsTab: React.FC = () => {
                           </span>
                         </td>
                         <td className="py-2 px-2 space-y-1" style={{ minWidth: "160px" }}>
-                          <select
-                            required
-                            className="w-full p-1 border border-slate-200 rounded text-[10px] font-bold text-slate-700 bg-white"
-                            value={rowDeductionCarIds[d.id] || ''}
-                            onChange={(e) => setRowDeductionCarIds(prev => ({ ...prev, [d.id]: e.target.value }))}
-                          >
-                            <option value="">-- اختر السيارة --</option>
-                            {db.cars.map(c => (
-                              <option key={c.id} value={c.id}>{c.car_number}</option>
-                            ))}
-                          </select>
+                          {(() => {
+                            const driverViolCarNums = [...new Set(
+                              db.violations.filter(v => v.driver_id === d.id).map(v => v.car_number)
+                            )];
+                            const driverViolCars = db.cars.filter(c => driverViolCarNums.includes(c.car_number));
+                            return (
+                              <select
+                                className="w-full p-1 border border-slate-200 rounded text-[10px] font-bold text-slate-700 bg-white"
+                                value={rowDeductionCarIds[d.id] || ''}
+                                onChange={(e) => setRowDeductionCarIds(prev => ({ ...prev, [d.id]: e.target.value }))}
+                              >
+                                <option value="">
+                                  {driverViolCars.length === 0 ? '-- لا توجد مخالفات --' : '-- سيارة المخالفة --'}
+                                </option>
+                                {driverViolCars.map(c => {
+                                  const cnt = db.violations.filter(v => v.driver_id === d.id && v.car_number === c.car_number).length;
+                                  return (
+                                    <option key={c.id} value={c.id}>{c.car_number} ({cnt})</option>
+                                  );
+                                })}
+                              </select>
+                            );
+                          })()}
                           <input
                             type="number"
                             min={1}
