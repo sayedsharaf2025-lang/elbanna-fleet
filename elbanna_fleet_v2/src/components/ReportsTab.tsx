@@ -39,8 +39,8 @@ export const ReportsTab: React.FC = () => {
   const [endDate, setEndDate] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [tempSearchQuery, setTempSearchQuery] = useState('');
-  const [deductionsYear, setDeductionsYear] = useState('2026');
-  const [deductionsMonth, setDeductionsMonth] = useState('all');
+  const [deductionsFromDate, setDeductionsFromDate] = useState('');
+  const [deductionsToDate, setDeductionsToDate] = useState('');
   
   // Invoices Query States
   const [invCarSearch, setInvCarSearch] = useState('');
@@ -67,8 +67,8 @@ export const ReportsTab: React.FC = () => {
     setEndDate('');
     setSearchQuery('');
     setTempSearchQuery('');
-    setDeductionsYear('2026');
-    setDeductionsMonth('all');
+    setDeductionsFromDate('');
+    setDeductionsToDate('');
     setInvCarSearch('');
     setInvQuerySearch('');
     setInvDateFrom('');
@@ -322,7 +322,7 @@ export const ReportsTab: React.FC = () => {
     return matchesOfficial && matchesDate && matchesQuery;
   });
 
-  // 5. Driver Deductions Report by Month & Year (or by date range if startDate/endDate are set)
+  // 5. Driver Deductions Report by Date Range
   const filteredDeductionsReport = enrichedMovements.filter(m => {
     if (m.type !== 'deduction' && m.type !== 'violation') return false;
 
@@ -332,31 +332,21 @@ export const ReportsTab: React.FC = () => {
 
     const matchesDriver = !selectedDriverId || m.driver_id === selectedDriverId;
     
-    // Parse Date YYYY-MM-DD
     const mDate = m.date || '';
-    const parts = mDate.split('-'); // e.g. ["2026", "06", "07"]
-
-    // If a date range is specified (startDate/endDate), use it — otherwise fall back to year/month filter
-    let matchesDate: boolean;
-    if (startDate || endDate) {
-      matchesDate = (!startDate || mDate >= startDate) && (!endDate || mDate <= endDate);
-    } else {
-      const matchesYear = !deductionsYear || parts[0] === deductionsYear;
-      const matchesMonth = deductionsMonth === 'all' || !deductionsMonth || parts[1] === deductionsMonth;
-      matchesDate = matchesYear && matchesMonth;
-    }
+    const matchesFrom = !deductionsFromDate || mDate >= deductionsFromDate;
+    const matchesTo = !deductionsToDate || mDate <= deductionsToDate;
     
     const matchesQuery = !searchQuery || 
       m.description.includes(searchQuery) ||
       drvCode.includes(searchQuery) ||
       drvName.includes(searchQuery);
 
-    return matchesDriver && matchesDate && matchesQuery;
+    return matchesDriver && matchesFrom && matchesTo && matchesQuery;
   });
 
   const totalDeductionsReportAmount = filteredDeductionsReport.reduce((sum, m) => sum + Math.abs(m.amount_change), 0);
 
-  // Group deductions by driver — show amount deducted IN the filtered period + current remaining balance
+  // Group deductions by driver to satisfy exact columns pattern
   const groupedDeductions = (() => {
     const map = new Map<string, { driverId: string; driverName: string; totalDeducted: number; remainingBalance: number }>();
 
@@ -372,7 +362,6 @@ export const ReportsTab: React.FC = () => {
           driverId: m.driver_id,
           driverName: drv.name,
           totalDeducted: Math.abs(m.amount_change),
-          // drv.balance = current total remaining balance owed by this driver (after ALL deductions)
           remainingBalance: drv.balance,
         });
       }
@@ -524,7 +513,7 @@ export const ReportsTab: React.FC = () => {
         headers: ['م', 'اسم السائق', 'مبلغ الخصم (ج.م)', 'المتبقى له حتى آخر تاريخ الكشف (ج.م)'],
         rows: groupedDeductions.map((g, i) => [i + 1, g.driverName, g.totalDeducted, g.remainingBalance])
       }];
-      exportToExcelHtml(`تقرير_استقطاعات_وخصومات_البنا_شهر_${deductionsMonth}_سنة_${deductionsYear}`, `تقرير الخصومات الشهري المجمع للموظفين والسائقين - شهر ${deductionsMonth} سنة ${deductionsYear}`, tables);
+      exportToExcelHtml(`تقرير_استقطاعات_وخصومات_البنا_${deductionsFromDate || 'البداية'}_الى_${deductionsToDate || 'النهاية'}`, `تقرير الخصومات المجمع للموظفين والسائقين - من ${deductionsFromDate || 'البداية'} إلى ${deductionsToDate || 'النهاية'}`, tables);
     } else if (activeSubReport === 'car_violations') {
       const targetCar = db.cars.find(c => c.id === selectedReportCarId);
       if (!targetCar) {
@@ -753,45 +742,26 @@ export const ReportsTab: React.FC = () => {
             </div>
           )}
 
-          {/* Conditional filter: Deductions Year and Month selection */}
+          {/* Conditional filter: Deductions Date Range */}
           {activeSubReport === 'deductions_report' && (
             <>
               <div>
-                <label className="block text-slate-405 font-bold mb-1">تحديد سنة الخصومات</label>
-                <select
-                  value={deductionsYear}
-                  onChange={(e) => setDeductionsYear(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2.5 focus:outline-none focus:border-rose-500 text-slate-200 font-bold"
-                >
-                  <option value="">كافة السنوات</option>
-                  <option value="2024">2024</option>
-                  <option value="2025">2025</option>
-                  <option value="2026">2026</option>
-                  <option value="2027">2027</option>
-                  <option value="2028">2028</option>
-                </select>
+                <label className="block text-slate-405 font-bold mb-1">من تاريخ الخصم</label>
+                <input
+                  type="date"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-rose-500 text-slate-200"
+                  value={deductionsFromDate}
+                  onChange={(e) => setDeductionsFromDate(e.target.value)}
+                />
               </div>
               <div>
-                <label className="block text-slate-405 font-bold mb-1">تحديد شهر الخصومات</label>
-                <select
-                  value={deductionsMonth}
-                  onChange={(e) => setDeductionsMonth(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2.5 focus:outline-none focus:border-rose-500 text-slate-200 font-bold"
-                >
-                  <option value="all">كل شهور السنة</option>
-                  <option value="01">يناير (01)</option>
-                  <option value="02">فبراير (02)</option>
-                  <option value="03">مارس (03)</option>
-                  <option value="04">أبريل (04)</option>
-                  <option value="05">مايو (05)</option>
-                  <option value="06">يونيو (06)</option>
-                  <option value="07">يوليو (07)</option>
-                  <option value="08">أغسطس (08)</option>
-                  <option value="09">سبتمبر (09)</option>
-                  <option value="10">أكتوبر (10)</option>
-                  <option value="11">نوفمبر (11)</option>
-                  <option value="12">ديسمبر (12)</option>
-                </select>
+                <label className="block text-slate-405 font-bold mb-1">إلى تاريخ الخصم</label>
+                <input
+                  type="date"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-rose-500 text-slate-200"
+                  value={deductionsToDate}
+                  onChange={(e) => setDeductionsToDate(e.target.value)}
+                />
               </div>
             </>
           )}
@@ -1423,24 +1393,20 @@ export const ReportsTab: React.FC = () => {
           <div className="space-y-6">
             <div className="p-4 bg-slate-950 rounded-xl border border-rose-500/10 flex flex-wrap justify-between items-center gap-4">
               <div className="space-y-1">
-                <span className="text-[10px] text-slate-400 font-semibold block">الفترة المحددة</span>
-                <p className="text-sm font-black text-rose-400">
-                  {(startDate || endDate)
-                    ? `${startDate || '---'} إلى ${endDate || '---'}`
-                    : `${deductionsYear || 'كافة السنوات'} — ${deductionsMonth === 'all' ? 'كافة الشهور' : `شهر (${deductionsMonth})`}`}
-                </p>
+                <span className="text-[10px] text-slate-400 font-semibold block">من تاريخ</span>
+                <p className="text-sm font-black text-rose-400">{deductionsFromDate || 'بداية السجل'}</p>
               </div>
               <div className="space-y-1">
-                <span className="text-[10px] text-slate-400 font-semibold block">عدد السائقين المخصوم عليهم</span>
+                <span className="text-[10px] text-slate-400 font-semibold block">إلى تاريخ</span>
+                <p className="text-sm font-black text-rose-400">{deductionsToDate || 'نهاية السجل'}</p>
+              </div>
+              <div className="space-y-1">
+                <span className="text-[10px] text-slate-400 font-semibold block">عدد السائقين المخصوم عليهم في الفترة</span>
                 <p className="text-sm font-black text-amber-400">{groupedDeductions.length} سائق</p>
               </div>
               <div className="space-y-1">
-                <span className="text-[10px] text-slate-400 font-semibold block">إجمالي مبالغ الخصم في الفترة</span>
+                <span className="text-[10px] text-slate-400 font-semibold block">إجمالي مبالغ الخصم في الفترة المحددة</span>
                 <p className="text-sm font-black text-red-500">{totalDeductionsReportAmount.toLocaleString()} ج.م</p>
-              </div>
-              <div className="space-y-1">
-                <span className="text-[10px] text-slate-400 font-semibold block">إجمالي المتبقي على السائقين</span>
-                <p className="text-sm font-black text-amber-400">{groupedDeductions.reduce((sum, g) => sum + g.remainingBalance, 0).toLocaleString()} ج.م</p>
               </div>
             </div>
 
@@ -1450,8 +1416,8 @@ export const ReportsTab: React.FC = () => {
                   <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
                     <th className="py-3 px-2 text-center w-8">م</th>
                     <th className="py-3 px-3 text-right">اسم السائق</th>
-                    <th className="py-3 px-3 text-left">المخصوم في الفترة</th>
-                    <th className="py-3 px-4 text-left">المتبقي عليه (الرصيد الحالي)</th>
+                    <th className="py-3 px-3 text-left">مبلغ الخصم في الفترة</th>
+                    <th className="py-3 px-4 text-left">الرصيد المتبقى (إجمالي)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1461,7 +1427,7 @@ export const ReportsTab: React.FC = () => {
                         <td className="py-3 px-2 font-mono text-center text-slate-500">{i + 1}</td>
                         <td className="py-3 px-3 font-bold text-slate-200">{g.driverName}</td>
                         <td className="py-3 px-3 font-mono font-black text-red-400 text-left">{g.totalDeducted.toLocaleString()} ج.م</td>
-                        <td className="py-3 px-4 font-mono font-black text-amber-400 text-left">{g.remainingBalance > 0 ? `${g.remainingBalance.toLocaleString()} ج.م` : '—'}</td>
+                        <td className="py-3 px-4 font-mono font-black text-rose-500 text-left">{g.remainingBalance.toLocaleString()} ج.م</td>
                       </tr>
                     );
                   })}
@@ -1474,12 +1440,12 @@ export const ReportsTab: React.FC = () => {
                 {groupedDeductions.length > 0 && (
                   <tfoot>
                     <tr className="bg-slate-950 text-slate-200 border-t border-slate-800 font-extrabold">
-                      <td colSpan={2} className="py-3 px-3 text-right text-slate-405">إجمالي الخصومات المستقطعة خلال الفترة المحددة:</td>
+                      <td colSpan={2} className="py-3 px-3 text-right text-slate-405">إجمالي الخصومات المستقطعة في الفترة من {deductionsFromDate || 'البداية'} إلى {deductionsToDate || 'النهاية'}:</td>
                       <td className="py-3 px-3 text-left font-mono text-rose-500 text-sm">
                         {totalDeductionsReportAmount.toLocaleString()} ج.م
                       </td>
                       <td className="py-3 px-4 text-left font-mono text-amber-500 text-xs">
-                        إجمالي المتبقي على السائقين: {groupedDeductions.reduce((sum, g) => sum + g.remainingBalance, 0).toLocaleString()} ج.م
+                        رصيد المديونيات المتبقي الإجمالي: {groupedDeductions.reduce((sum, g) => sum + g.remainingBalance, 0).toLocaleString()} ج.م
                       </td>
                     </tr>
                   </tfoot>
@@ -1822,4 +1788,17 @@ export const ReportsTab: React.FC = () => {
           <A5PrintPreview
             type="invoice"
             invoiceData={{
-              invoice: 
+              invoice: selectedPrintInvoice,
+              items: selectedPrintItems,
+              officialName: officialName,
+              carsMap: carsMap,
+              carsObjMap: carsObjMap
+            }}
+            onClose={() => setPrintInvoiceId(null)}
+          />
+        );
+      })()}
+      
+    </div>
+  );
+};
