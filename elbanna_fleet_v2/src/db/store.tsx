@@ -33,6 +33,11 @@ export const normalizeDateToYmd = (dateStr: string): string => {
   if (!dateStr || typeof dateStr !== 'string') return new Date().toISOString().split('T')[0];
   const cleaned = dateStr.trim();
   
+  // Rule 0: ISO timestamp with T (e.g. 2026-06-22T10:30:00+00:00 or 2026-06-22T10:30:00Z)
+  if (cleaned.includes('T')) {
+    return cleaned.substring(0, 10);
+  }
+
   // Rule 1: Correct format: YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
     return cleaned;
@@ -769,6 +774,19 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const cloudIds = new Set(cloudMovements.map(m => m.id));
         const localOnly = movements.filter(m => !cloudIds.has(m.id));
         setMovements([...cloudMovements, ...localOnly]);
+
+        // رفع الحركات المحلية الغائبة عن السحابة تلقائياً
+        if (localOnly.length > 0 && supabase) {
+          const sanitized = localOnly.map(m => ({
+            ...m,
+            date: normalizeDateToYmd(m.date)
+          }));
+          supabase.from('driver_account_movements').upsert(sanitized)
+            .then(({ error }) => {
+              if (error) console.warn("Auto-upload local movements error:", error.message);
+              else console.log(`✅ Auto-uploaded ${sanitized.length} local movement(s) to Supabase`);
+            });
+        }
       }
       if (resCustodyAccs.data) {
         const cloudAccs = resCustodyAccs.data;
@@ -2517,24 +2535,4 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         invoiceItems: importedInvoiceItems,
         auditLogs: importedAuditLogs,
         movements: importedMovements,
-        custodyAccounts: importedCustodyAccounts,
-        custodyMovements: importedCustodyMovements
-      } = parsed.data;
-
-      if (
-        !Array.isArray(importedDrivers) ||
-        !Array.isArray(importedOfficials) ||
-        !Array.isArray(importedCars) ||
-        !Array.isArray(importedViolations) ||
-        !Array.isArray(importedInvoices)
-      ) {
-        return { success: false, message: "البيانات داخل ملف النسخة الاحتياطية تالفة أو ناقصة." };
-      }
-
-      setDrivers(importedDrivers);
-      setOfficials(importedOfficials);
-      setCars(importedCars);
-      setViolations(importedViolations);
-      setInvoices(importedInvoices);
-      if (Array.isArray(importedInvoiceItems)) {
-        const sorted = [...imported
+        cu
