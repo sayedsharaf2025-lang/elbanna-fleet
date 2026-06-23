@@ -206,7 +206,24 @@ export const DeductionsTab: React.FC = () => {
 
   return (
     <div className="space-y-6" id="deductions_tab_root" style={{ direction: 'rtl' }}>
-      
+
+      {/* Toolbar — sticky دايماً في الأعلى */}
+      <div className="sticky top-0 z-30 flex items-center justify-between bg-indigo-950 rounded-2xl px-4 py-3 border border-indigo-800 shadow-lg">
+        <div className="flex items-center gap-2">
+          <History className="w-4 h-4 text-indigo-300" />
+          <span className="text-xs text-indigo-200 font-semibold">
+            {db.movements.filter(m => m.type === 'deduction').length} حركة خصم مسجلة
+          </span>
+        </div>
+        <button
+          onClick={() => { setShowMovementsPanel(v => !v); setMovSearchQuery(''); setEditingMovId(null); }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-sm border ${showMovementsPanel ? 'bg-white text-indigo-700 border-white' : 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-500'}`}
+        >
+          <Search className="w-4 h-4" />
+          {showMovementsPanel ? 'إغلاق السجل' : 'بحث وتعديل حركات الخصم'}
+        </button>
+      </div>
+
       {/* A5 Print Screen Popup Overlay */}
       {printDocument && (
         <A5PrintPreview
@@ -224,23 +241,6 @@ export const DeductionsTab: React.FC = () => {
           onClose={() => setPrintDocument(null)}
         />
       )}
-
-      {/* Toolbar — زر سجل الحركات دايماً في الأعلى */}
-      <div className="flex items-center justify-between bg-indigo-950 rounded-2xl px-4 py-3 border border-indigo-800">
-        <div className="flex items-center gap-2">
-          <History className="w-4 h-4 text-indigo-300" />
-          <span className="text-xs text-indigo-200 font-semibold">
-            {db.movements.filter(m => m.type === 'deduction').length} حركة خصم مسجلة
-          </span>
-        </div>
-        <button
-          onClick={() => { setShowMovementsPanel(v => !v); setMovSearchQuery(''); setEditingMovId(null); }}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all shadow-sm border ${showMovementsPanel ? 'bg-white text-indigo-700 border-white' : 'bg-indigo-600 text-white border-indigo-500 hover:bg-indigo-500'}`}
-        >
-          <Search className="w-4 h-4" />
-          {showMovementsPanel ? 'إغلاق السجل' : 'بحث وتعديل حركات الخصم'}
-        </button>
-      </div>
 
       {/* Movements History Panel */}
       {showMovementsPanel && (
@@ -569,9 +569,21 @@ export const DeductionsTab: React.FC = () => {
               </thead>
               <tbody>
                 {db.drivers
-                  .filter(d => !filterDebtorsOnly || d.balance > 0)
+                  .filter(d => {
+                    if (!filterDebtorsOnly) return true;
+                    const totalViol = getTotalViolationsAmount(d.id);
+                    const totalDed = db.movements
+                      .filter(m => m.driver_id === d.id && m.type === 'deduction')
+                      .reduce((sum, m) => sum + Math.abs(m.amount_change), 0);
+                    return Math.max(0, totalViol - totalDed) > 0;
+                  })
                   .map(d => {
                     const totalViolations = getTotalViolationsAmount(d.id);
+                    // المتبقي = إجمالي المخالفات - إجمالي الخصومات المدفوعة فعلاً
+                    const totalDeducted = db.movements
+                      .filter(m => m.driver_id === d.id && m.type === 'deduction')
+                      .reduce((sum, m) => sum + Math.abs(m.amount_change), 0);
+                    const remaining = Math.max(0, totalViolations - totalDeducted);
                     return (
                       <tr key={d.id} className="border-b border-slate-100 hover:bg-slate-50/80 transition-colors">
                         <td className="py-3 px-3 font-mono font-bold text-slate-900">{d.driver_code}</td>
@@ -587,8 +599,8 @@ export const DeductionsTab: React.FC = () => {
                           {totalViolations.toLocaleString()} ج.م
                         </td>
                         <td className="py-3 px-3 text-left">
-                          <span className={`font-mono font-bold text-[13px] ${d.balance > 0 ? 'text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-100' : 'text-slate-500'}`}>
-                            {d.balance.toLocaleString()} ج.م
+                          <span className={`font-mono font-bold text-[13px] ${remaining > 0 ? 'text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-100' : 'text-slate-500'}`}>
+                            {remaining.toLocaleString()} ج.م
                           </span>
                         </td>
                         <td className="py-2 px-2 space-y-1" style={{ minWidth: "160px" }}>
