@@ -323,8 +323,9 @@ export const ReportsTab: React.FC = () => {
   });
 
   // 5. Driver Deductions Report by Date Range
-  const filteredDeductionsReport = enrichedMovements.filter(m => {
-    if (m.type !== 'deduction' && m.type !== 'violation') return false;
+  // يعتمد على db.movements الحقيقية فقط — ليس الحركات الاصطناعية من المخالفات
+  const filteredDeductionsReport = db.movements.filter(m => {
+    if (m.type !== 'deduction') return false;
 
     const drv = db.drivers.find(d => d.id === m.driver_id);
     const drvCode = drv ? drv.driver_code : '';
