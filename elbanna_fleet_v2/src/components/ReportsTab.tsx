@@ -1,3 +1,5 @@
+
+};
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -333,7 +335,8 @@ export const ReportsTab: React.FC = () => {
 
     const matchesDriver = !selectedDriverId || m.driver_id === selectedDriverId;
     
-    const mDate = m.date || '';
+    // تحويل التاريخ لـ YYYY-MM-DD فقط (للتعامل مع ISO timestamps من Supabase)
+    const mDate = m.date ? m.date.substring(0, 10) : '';
     const matchesFrom = !deductionsFromDate || mDate >= deductionsFromDate;
     const matchesTo = !deductionsToDate || mDate <= deductionsToDate;
     
