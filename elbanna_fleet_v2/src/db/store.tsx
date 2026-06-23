@@ -152,6 +152,8 @@ interface DbContextType {
   // Deduction Actions
   applyIndividualDeduction: (driverId: string, amount: number, description: string, date?: string, carId?: string) => void;
   applyGroupDeductionRpc: (amount: number, description: string) => Promise<boolean>;
+  deleteMovement: (id: string) => void;
+  editMovementAmount: (id: string, newAmount: number, newDescription: string) => void;
 
   // Invoice & Custody Transactions (Crucial database logic)
   createInvoice: (invoiceData: Omit<Invoice, 'id' | 'invoice_number' | 'version' | 'is_modified' | 'is_deleted'>, items: Omit<InvoiceItem, 'id' | 'invoice_id' | 'car_id'>[]) => { success: boolean; error?: string; invoice?: Invoice };
@@ -2532,7 +2534,4 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         cars: importedCars,
         violations: importedViolations,
         invoices: importedInvoices,
-        invoiceItems: importedInvoiceItems,
-        auditLogs: importedAuditLogs,
-        movements: importedMovements,
-        cu
+   
