@@ -20,7 +20,9 @@ import {
   FlameKindling,
   FileSpreadsheet,
   RotateCcw,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Printer,
+  X
 } from 'lucide-react';
 
 export const LicenseDashboardTab: React.FC = () => {
@@ -127,6 +129,11 @@ export const LicenseDashboardTab: React.FC = () => {
   const [updatingCarId, setUpdatingCarId] = useState<string | null>(null);
   const [newLicEndDate, setNewLicEndDate] = useState('');
   const [newExtStatus, setNewExtStatus] = useState<'valid' | 'expired' | 'warning'>('valid');
+
+  // License Invoice Print State
+  const [printInvoiceCarId, setPrintInvoiceCarId] = useState<string | null>(null);
+  const [licInvoiceSearch, setLicInvoiceSearch] = useState('');
+  const [showLicInvoiceModal, setShowLicInvoiceModal] = useState(false);
 
   // Real-time toast indicators
   const [showToast, setShowToast] = useState(false);
@@ -316,6 +323,93 @@ export const LicenseDashboardTab: React.FC = () => {
     document.body.removeChild(link);
   };
 
+  // Handle printing license invoice for a specific car
+  const handlePrintLicenseInvoice = (car: Car) => {
+    const driverObj = db.drivers.find(d => d.id === car.driver_id);
+    const supervisorObj = db.officials.find(o => o.id === car.license_official_id);
+    const licStatus = getLicenseStatus(car);
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const html = `<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8"/>
+<title>فاتورة ترخيص - ${car.car_number}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Cairo', Arial, sans-serif; direction: rtl; background: #fff; color: #111; font-size: 13px; }
+  .page { max-width: 750px; margin: 20px auto; border: 2px solid #1e293b; padding: 24px; }
+  .header { text-align: center; border-bottom: 3px double #1e293b; padding-bottom: 12px; margin-bottom: 16px; }
+  .header h1 { font-size: 20px; font-weight: 900; }
+  .header h2 { font-size: 13px; color: #555; margin-top: 4px; }
+  .car-plate { display: inline-block; background: #f1f5f9; border: 2px solid #334155; border-radius: 8px; padding: 6px 20px; font-size: 22px; font-weight: 900; font-family: monospace; letter-spacing: 2px; margin: 8px 0; }
+  .status-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 900; margin-top: 6px; }
+  .status-expired { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+  .status-near { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+  .status-valid { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th { background: #1e293b; color: #fff; padding: 8px 12px; text-align: right; font-size: 12px; }
+  td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  .label { color: #64748b; font-weight: 700; width: 40%; }
+  .value { font-weight: 900; color: #0f172a; }
+  .footer { margin-top: 24px; border-top: 1px dashed #94a3b8; padding-top: 12px; text-align: center; color: #94a3b8; font-size: 10px; }
+  .section-title { font-size: 12px; font-weight: 900; color: #334155; background: #f1f5f9; padding: 6px 12px; margin-top: 12px; border-right: 4px solid #3b82f6; }
+  @media print { body { margin: 0; } .page { border: none; margin: 0; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <h1>🚗 فاتورة ترخيص سيارة — شركة البنا</h1>
+    <h2>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')}</h2>
+    <div class="car-plate">${car.car_number}</div><br/>
+    <span class="status-badge ${licStatus.label.includes('منتهي') ? 'status-expired' : licStatus.label.includes('قريب') ? 'status-near' : 'status-valid'}">${licStatus.label}</span>
+  </div>
+
+  <div class="section-title">بيانات السيارة الأساسية</div>
+  <table>
+    <tr><td class="label">رقم اللوحة</td><td class="value">${car.car_number}</td></tr>
+    <tr><td class="label">الشركة المالكة</td><td class="value">${car.owner_company || '—'}</td></tr>
+    <tr><td class="label">نوع السيارة</td><td class="value">${car.car_type || '—'}</td></tr>
+    <tr><td class="label">الماركة / الموديل</td><td class="value">${car.brand || '—'} / ${car.model || '—'}</td></tr>
+    <tr><td class="label">رقم الشاسيه</td><td class="value font-mono">${car.chassis_number || '—'}</td></tr>
+    <tr><td class="label">رقم الموتور</td><td class="value font-mono">${car.motor_number || '—'}</td></tr>
+  </table>
+
+  <div class="section-title">بيانات الترخيص والتأمين</div>
+  <table>
+    <tr><td class="label">تاريخ انتهاء الترخيص</td><td class="value" style="color:${licStatus.label.includes('منتهي') ? '#dc2626' : '#059669'}">${car.license_end_date || '—'}</td></tr>
+    <tr><td class="label">إدارة / جهة المرور</td><td class="value">${car.traffic_office || '—'}</td></tr>
+    <tr><td class="label">موقف التأمين</td><td class="value">${car.insurance_status || '—'}</td></tr>
+    <tr><td class="label">مشرف الترخيص</td><td class="value">${supervisorObj ? supervisorObj.name : 'غير مكلف'}</td></tr>
+    <tr><td class="label">السائق المكلف</td><td class="value">${driverObj ? driverObj.name : 'غير مكلف'}</td></tr>
+    <tr><td class="label">حالة الطفاية</td><td class="value">${car.extinguisher_status === 'valid' ? '✅ سليمة' : car.extinguisher_status === 'warning' ? '⚠️ تحذير' : '❌ منتهية'}</td></tr>
+  </table>
+
+  <div class="footer">
+    <p>وثيقة رسمية — نظام إدارة أسطول البنا | تم الإصدار بتاريخ ${new Date().toLocaleDateString('ar-EG')} ${new Date().toLocaleTimeString('ar-EG')}</p>
+  </div>
+</div>
+<script>window.onload = function() { window.print(); }</script>
+</body>
+</html>`;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
+  // Filter cars for license invoice search
+  const licInvoiceSearchResults = licInvoiceSearch.trim()
+    ? db.cars.filter(c =>
+        c.car_number.toLowerCase().includes(licInvoiceSearch.toLowerCase()) ||
+        (c.chassis_number && c.chassis_number.toLowerCase().includes(licInvoiceSearch.toLowerCase()))
+      )
+    : [];
+
   return (
     <div className="space-y-6" id="license_dashboard_tab" style={{ direction: 'rtl' }}>
       
@@ -324,6 +418,63 @@ export const LicenseDashboardTab: React.FC = () => {
         <div className="p-4 rounded-xl border bg-emerald-50 border-emerald-400/20 text-emerald-800 text-xs md:text-sm font-bold flex items-center gap-2 animate-pulse no-print">
           <CheckCircle2 className="w-5 h-5 text-emerald-600" />
           تم تحديث الترخيص والطفايات بالخادم وتعميم اللون الجديد لحظيًا لجميع المستخدمين على الشبكة! ✔
+        </div>
+      )}
+
+      {/* License Invoice Search Modal */}
+      {showLicInvoiceModal && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden text-right">
+            <div className="bg-slate-900 px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Printer className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-white font-black text-sm">طباعة فاتورة ترخيص — ابحث برقم السيارة</h3>
+              </div>
+              <button onClick={() => { setShowLicInvoiceModal(false); setLicInvoiceSearch(''); }} className="text-slate-400 hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-slate-600 font-bold mb-2 text-sm">رقم السيارة أو الشاسيه</label>
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="مثال: أ ب ج 1234 أو رقم الشاسيه..."
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2.5 text-slate-800 font-medium focus:outline-none focus:border-blue-500 text-sm"
+                  value={licInvoiceSearch}
+                  onChange={(e) => setLicInvoiceSearch(e.target.value)}
+                />
+              </div>
+              {licInvoiceSearch.trim() && (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {licInvoiceSearchResults.length === 0 ? (
+                    <p className="text-center text-slate-400 py-4 font-bold text-sm">لا توجد سيارات مطابقة</p>
+                  ) : (
+                    licInvoiceSearchResults.map(car => {
+                      const licStatus = getLicenseStatus(car);
+                      return (
+                        <div key={car.id} className="flex items-center justify-between p-3 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+                          <div>
+                            <span className="font-mono font-black text-slate-800 text-sm">{car.car_number}</span>
+                            <span className="text-xs text-slate-400 mr-2">{car.owner_company}</span>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full mr-1 ${licStatus.label.includes('منتهي') ? 'bg-red-100 text-red-700' : licStatus.label.includes('قريب') ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{licStatus.label}</span>
+                          </div>
+                          <button
+                            onClick={() => { handlePrintLicenseInvoice(car); setShowLicInvoiceModal(false); setLicInvoiceSearch(''); }}
+                            className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            طباعة
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -626,6 +777,15 @@ export const LicenseDashboardTab: React.FC = () => {
             تصدير كشف إكسيل (Excel Export)
           </button>
 
+          <button
+            onClick={() => { setShowLicInvoiceModal(true); setLicInvoiceSearch(''); }}
+            type="button"
+            className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition-colors shadow-sm text-xs md:text-sm"
+          >
+            <Printer className="w-4 h-4" />
+            طباعة فاتورة ترخيص
+          </button>
+
         </div>
       </div>
 
@@ -698,14 +858,24 @@ export const LicenseDashboardTab: React.FC = () => {
               </div>
 
               {/* Action Buttons */}
-              <button
-                onClick={() => handleOpenUpdateForm(car)}
-                type="button"
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold p-2.5 rounded-xl transition-all text-center flex items-center justify-center gap-1 text-xs"
-              >
-                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
-                تحديث تاريخ الترخيص والطفايات فورا
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleOpenUpdateForm(car)}
+                  type="button"
+                  className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold p-2.5 rounded-xl transition-all text-center flex items-center justify-center gap-1 text-xs"
+                >
+                  <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                  تحديث الترخيص
+                </button>
+                <button
+                  onClick={() => handlePrintLicenseInvoice(car)}
+                  type="button"
+                  className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold px-3 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1 text-xs"
+                  title="طباعة فاتورة الترخيص"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
             </div>
           );
