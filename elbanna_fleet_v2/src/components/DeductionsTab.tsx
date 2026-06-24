@@ -659,7 +659,12 @@ export const DeductionsTab: React.FC = () => {
                       </tr>
                     );
                   })}
-                {db.drivers.filter(d => !filterDebtorsOnly || d.balance > 0).length === 0 && (
+                {db.drivers.filter(d => {
+                  if (!filterDebtorsOnly) return true;
+                  const totalViol = getTotalViolationsAmount(d.id);
+                  const totalDed = db.movements.filter(m => m.driver_id === d.id && m.type === 'deduction').reduce((sum, m) => sum + Math.abs(m.amount_change), 0);
+                  return Math.max(0, totalViol - totalDed) > 0;
+                }).length === 0 && (
                   <tr>
                     <td colSpan={6} className="py-12 text-center text-slate-400">
                       لا يوجد أي سائقين متبقي عليهم مديونيات أو مخالفات لم تسدد حالياً.
