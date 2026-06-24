@@ -207,8 +207,8 @@ export const DeductionsTab: React.FC = () => {
   return (
     <div className="space-y-6" id="deductions_tab_root" style={{ direction: 'rtl' }}>
 
-      {/* Toolbar — sticky دايماً في الأعلى */}
-      <div className="sticky top-0 z-30 flex items-center justify-between bg-indigo-950 rounded-2xl px-4 py-3 border border-indigo-800 shadow-lg">
+      {/* Toolbar — زر ثابت دايماً */}
+      <div className="flex items-center justify-between bg-indigo-950 rounded-2xl px-4 py-3 border border-indigo-800 shadow-lg">
         <div className="flex items-center gap-2">
           <History className="w-4 h-4 text-indigo-300" />
           <span className="text-xs text-indigo-200 font-semibold">
@@ -540,22 +540,116 @@ export const DeductionsTab: React.FC = () => {
               <h3 className="font-bold text-slate-800 text-sm md:text-base">الأرصدة والمديونيات الجارية والخصومات المتبقية على السائقين</h3>
               <p className="text-xs text-slate-400 mt-0.5">سجل السائقين الذين تترتب عليهم مخالفات لم تسدد لإجراء خصومات وطباعة كشّف الحساب فوراً</p>
             </div>
-            
-            {/* Filter Toggle */}
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-slate-650 cursor-pointer flex items-center gap-1.5 bg-slate-50 p-2 rounded-lg border border-slate-200">
-                <input
-                  type="checkbox"
-                  checked={filterDebtorsOnly}
-                  onChange={(e) => setFilterDebtorsOnly(e.target.checked)}
-                  className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                />
-                <span>عرض الذين عليهم متبقي مخالفات فقط</span>
-              </label>
-            </div>
+
+          {/* زرا التبديل */}
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => setFilterDebtorsOnly(false)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all ${!filterDebtorsOnly ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+            >
+              <History className="w-3.5 h-3.5" />
+              عرض جميع حركات الخصم
+            </button>
+            <button
+              onClick={() => setFilterDebtorsOnly(true)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all ${filterDebtorsOnly ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              السائقين اللي عليهم متبقي فقط
+            </button>
           </div>
+        </div>
 
           <div className="overflow-x-auto text-xs font-sans">
+
+            {/* عرض جميع حركات الخصم مع التاريخ والتعديل والحذف */}
+            {!filterDebtorsOnly && (
+              <table className="w-full text-right border-collapse min-w-[600px]">
+                <thead>
+                  <tr className="bg-indigo-50 text-slate-600 border-b border-indigo-100">
+                    <th className="py-2.5 px-3">السائق</th>
+                    <th className="py-2.5 px-3">تاريخ الخصم</th>
+                    <th className="py-2.5 px-3">البيان</th>
+                    <th className="py-2.5 px-3 text-left">المبلغ</th>
+                    <th className="py-2.5 px-3 text-center">إجراء</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const allDeductions = db.movements
+                      .filter(m => m.type === 'deduction')
+                      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                    if (allDeductions.length === 0) return (
+                      <tr><td colSpan={5} className="py-10 text-center text-slate-400">لا توجد حركات خصم مسجلة</td></tr>
+                    );
+                    return allDeductions.map(m => {
+                      const drv = db.drivers.find(d => d.id === m.driver_id);
+                      const isEditing = editingMovId === m.id;
+                      return (
+                        <tr key={m.id} className={`border-b border-slate-100 transition-colors ${isEditing ? 'bg-amber-50' : 'hover:bg-slate-50'}`}>
+                          <td className="py-2.5 px-3 font-bold text-slate-800">
+                            <div>{drv?.name || '—'}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{drv?.driver_code}</div>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-indigo-700 font-bold">
+                            {m.date?.substring(0, 10) || '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600">
+                            {isEditing ? (
+                              <input
+                                className="w-full border border-amber-300 rounded px-2 py-1 text-xs focus:outline-none"
+                                value={editDescription}
+                                onChange={e => setEditDescription(e.target.value)}
+                              />
+                            ) : (
+                              <span className="truncate block max-w-[180px]">{m.description}</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-left">
+                            {isEditing ? (
+                              <input
+                                type="number" min={1}
+                                className="w-20 border border-amber-300 rounded px-2 py-1 text-xs font-mono font-bold focus:outline-none"
+                                value={editAmount}
+                                onChange={e => setEditAmount(e.target.value)}
+                              />
+                            ) : (
+                              <span className="font-mono font-bold text-rose-600">{Math.abs(m.amount_change).toLocaleString()} ج.م</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="flex gap-1.5 justify-center">
+                              {isEditing ? (
+                                <>
+                                  <button onClick={() => { if (!editAmount || Number(editAmount) <= 0) return; db.editMovementAmount(m.id, Number(editAmount), editDescription); setEditingMovId(null); }} className="bg-emerald-600 text-white px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1">
+                                    <Check className="w-3 h-3" /> حفظ
+                                  </button>
+                                  <button onClick={() => setEditingMovId(null)} className="bg-slate-200 text-slate-700 px-2 py-1 rounded-lg text-[10px] font-bold">
+                                    إلغاء
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button onClick={() => { setEditingMovId(m.id); setEditAmount(String(Math.abs(m.amount_change))); setEditDescription(m.description); }} className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1">
+                                    <Pencil className="w-3 h-3" /> تعديل
+                                  </button>
+                                  <button onClick={() => { if (confirm(`حذف خصم ${Math.abs(m.amount_change)} ج.م نهائياً؟`)) db.deleteMovement(m.id); }} className="bg-red-50 text-red-600 border border-red-100 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1">
+                                    <Trash2 className="w-3 h-3" /> حذف
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            )}
+
+            {/* عرض السائقين اللي عليهم متبقي */}
+            {filterDebtorsOnly && (
             <table className="w-full text-right border-collapse min-w-[700px]">
               <thead>
                 <tr className="bg-slate-50 text-slate-500 border-b border-slate-100">
@@ -563,14 +657,13 @@ export const DeductionsTab: React.FC = () => {
                   <th className="py-2.5 px-3">السائق المقر</th>
                   <th className="py-2.5 px-3 text-left">إجمالي المخالفات</th>
                   <th className="py-2.5 px-3 text-left">المتبقي المطلوب</th>
-                  <th className="py-2.5 px-3 text-right" style={{ width: '160px' }}>تسجيل الخصم</th>
+                  <th className="py-2.5 px-3 text-right" style={{ width: '120px' }}>مبلغ الخصم</th>
                   <th className="py-2.5 px-3 text-center" style={{ width: '180px' }}>الإجراءات</th>
                 </tr>
               </thead>
               <tbody>
                 {db.drivers
                   .filter(d => {
-                    if (!filterDebtorsOnly) return true;
                     const totalViol = getTotalViolationsAmount(d.id);
                     const totalDed = db.movements
                       .filter(m => m.driver_id === d.id && m.type === 'deduction')
@@ -579,11 +672,15 @@ export const DeductionsTab: React.FC = () => {
                   })
                   .map(d => {
                     const totalViolations = getTotalViolationsAmount(d.id);
-                    // المتبقي = إجمالي المخالفات - إجمالي الخصومات المدفوعة فعلاً
                     const totalDeducted = db.movements
                       .filter(m => m.driver_id === d.id && m.type === 'deduction')
                       .reduce((sum, m) => sum + Math.abs(m.amount_change), 0);
                     const remaining = Math.max(0, totalViolations - totalDeducted);
+
+                    // السيارة الأوتوماتيك — أول سيارة عليها مخالفات للسائق
+                    const autoCarNum = db.violations.find(v => v.driver_id === d.id)?.car_number;
+                    const autoCar = autoCarNum ? db.cars.find(c => c.car_number === autoCarNum) : undefined;
+
                     return (
                       <tr key={d.id} className="border-b border-slate-100 hover:bg-slate-50/80 transition-colors">
                         <td className="py-3 px-3 font-mono font-bold text-slate-900">{d.driver_code}</td>
@@ -592,67 +689,55 @@ export const DeductionsTab: React.FC = () => {
                             <div className="w-6 h-6 rounded-full bg-indigo-50 font-black text-center text-[10px] text-indigo-700 flex items-center justify-center">
                               {d.name.slice(0, 1)}
                             </div>
-                            <span>{d.name}</span>
+                            <div>
+                              <div>{d.name}</div>
+                              {autoCar && <div className="text-[10px] text-indigo-500 font-mono">🚗 {autoCar.car_number}</div>}
+                            </div>
                           </div>
                         </td>
                         <td className="py-3 px-3 text-left font-mono font-semibold text-slate-700">
                           {totalViolations.toLocaleString()} ج.م
                         </td>
                         <td className="py-3 px-3 text-left">
-                          <span className={`font-mono font-bold text-[13px] ${remaining > 0 ? 'text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-100' : 'text-slate-500'}`}>
+                          <span className="font-mono font-bold text-[13px] text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-100">
                             {remaining.toLocaleString()} ج.م
                           </span>
                         </td>
-                        <td className="py-2 px-2 space-y-1" style={{ minWidth: "160px" }}>
-                          {(() => {
-                            const driverViolCarNums = [...new Set(
-                              db.violations.filter(v => v.driver_id === d.id).map(v => v.car_number)
-                            )];
-                            const driverViolCars = db.cars.filter(c => driverViolCarNums.includes(c.car_number));
-                            return (
-                              <select
-                                className="w-full p-1 border border-slate-200 rounded text-[10px] font-bold text-slate-700 bg-white"
-                                value={rowDeductionCarIds[d.id] || ''}
-                                onChange={(e) => setRowDeductionCarIds(prev => ({ ...prev, [d.id]: e.target.value }))}
-                              >
-                                <option value="">
-                                  {driverViolCars.length === 0 ? '-- لا توجد مخالفات --' : '-- سيارة المخالفة --'}
-                                </option>
-                                {driverViolCars.map(c => {
-                                  const cnt = db.violations.filter(v => v.driver_id === d.id && v.car_number === c.car_number).length;
-                                  return (
-                                    <option key={c.id} value={c.id}>{c.car_number} ({cnt})</option>
-                                  );
-                                })}
-                              </select>
-                            );
-                          })()}
+                        <td className="py-2 px-2" style={{ minWidth: "110px" }}>
                           <input
                             type="number"
                             min={1}
                             placeholder="مبلغ الخصم"
                             value={rowDeductionAmounts[d.id] || ''}
                             onChange={(e) => setRowDeductionAmounts(prev => ({ ...prev, [d.id]: e.target.value }))}
-                            className="w-full p-1.5 border border-slate-250 rounded text-xs font-mono font-bold focus:outline-none focus:border-indigo-500 bg-white"
+                            className="w-full p-1.5 border border-slate-200 rounded text-xs font-mono font-bold focus:outline-none focus:border-indigo-500 bg-white"
                           />
                         </td>
                         <td className="py-3 px-3 text-center">
                           <div className="flex gap-1.5 justify-center">
                             <button
                               type="button"
-                              onClick={() => handleSaveRowDeduction(d)}
-                              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition-all duration-150 active:scale-95 shadow-sm"
+                              onClick={() => {
+                                const amountStr = rowDeductionAmounts[d.id];
+                                if (!amountStr || Number(amountStr) <= 0) { alert("الرجاء إدخال مبلغ الخصم!"); return; }
+                                if (!autoCar) { alert("لا توجد سيارة مرتبطة بمخالفات هذا السائق!"); return; }
+                                const amt = Number(amountStr);
+                                const today = new Date().toISOString().split('T')[0];
+                                db.applyIndividualDeduction(d.id, amt, `خصم مستقطع للسيارة (${autoCar.car_number})`, today, autoCar.id);
+                                setPrintDocument({ type: 'deduction', driver: { ...d, balance: Math.max(0, d.balance - amt) }, amount: amt, description: `خصم مستقطع للسيارة (${autoCar.car_number})` });
+                                setRowDeductionAmounts(prev => { const next = { ...prev }; delete next[d.id]; return next; });
+                              }}
+                              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-2.5 py-1 rounded-lg text-[11px] transition-all active:scale-95 shadow-sm"
                             >
                               حفظ الخصم
                             </button>
                             <button
                               type="button"
                               onClick={() => handlePrintRowStatement(d)}
-                              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold px-2.5 py-1 rounded-lg border border-emerald-55/10 transition-all text-[11px] flex items-center gap-1.5"
-                              title="طباعة إشعار كشف الحساب والخصم المعتمد للأرشيف"
+                              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold px-2.5 py-1 rounded-lg border border-emerald-200 transition-all text-[11px] flex items-center gap-1"
                             >
                               <Printer className="w-3 h-3" />
-                              كشف حساب
+                              كشف
                             </button>
                           </div>
                         </td>
@@ -660,19 +745,17 @@ export const DeductionsTab: React.FC = () => {
                     );
                   })}
                 {db.drivers.filter(d => {
-                  if (!filterDebtorsOnly) return true;
-                  const totalViol = getTotalViolationsAmount(d.id);
-                  const totalDed = db.movements.filter(m => m.driver_id === d.id && m.type === 'deduction').reduce((sum, m) => sum + Math.abs(m.amount_change), 0);
-                  return Math.max(0, totalViol - totalDed) > 0;
+                  const tv = getTotalViolationsAmount(d.id);
+                  const td2 = db.movements.filter(m => m.driver_id === d.id && m.type === 'deduction').reduce((s, m) => s + Math.abs(m.amount_change), 0);
+                  return Math.max(0, tv - td2) > 0;
                 }).length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-slate-400">
-                      لا يوجد أي سائقين متبقي عليهم مديونيات أو مخالفات لم تسدد حالياً.
-                    </td>
+                    <td colSpan={6} className="py-12 text-center text-slate-400">لا يوجد سائقين عليهم متبقي مخالفات حالياً ✅</td>
                   </tr>
                 )}
               </tbody>
             </table>
+            )}
           </div>
         </div>
 
