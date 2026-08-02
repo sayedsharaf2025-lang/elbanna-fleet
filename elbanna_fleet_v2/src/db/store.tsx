@@ -1211,13 +1211,37 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   const deleteDriver = (id: string) => {
+    // لازم نمسح كل الحركات والمخالفات المرتبطة بالسائق ده أولاً محلياً وسحابياً
+    // لأن لو فضلوا مرتبطين بيه في قاعدة البيانات (Foreign Key) هيرفض حذف السائق
+    // وهيفضل السائق راجع تاني كل ما نعمل مزامنة/تحميل من السحابة رغم إننا شايفينه اتمسح محلياً
+    const relatedMovementIds = movements.filter(m => m.driver_id === id).map(m => m.id);
+    const relatedViolationIds = violations.filter(v => v.driver_id === id).map(v => v.id);
+
     setDrivers(prev => prev.filter(d => d.id !== id));
+    setMovements(prev => prev.filter(m => m.driver_id !== id));
+    setViolations(prev => prev.filter(v => v.driver_id !== id));
 
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
-      supabase.from('drivers').delete().eq('id', id).then(({ error }) => {
-        if (error) console.error("Supabase delete driver error:", error);
-      });
+      (async () => {
+        try {
+          if (relatedMovementIds.length > 0) {
+            const { error } = await supabase.from('driver_account_movements').delete().in('id', relatedMovementIds);
+            if (error) console.error("Supabase delete driver movements error:", error);
+          }
+          if (relatedViolationIds.length > 0) {
+            const { error } = await supabase.from('violations').delete().in('id', relatedViolationIds);
+            if (error) console.error("Supabase delete driver violations error:", error);
+          }
+          const { error: driverError } = await supabase.from('drivers').delete().eq('id', id);
+          if (driverError) {
+            console.error("Supabase delete driver error:", driverError);
+            alert(`تنبيه: تم حذف السائق من الشاشة لكن فشل حذفه نهائياً من قاعدة البيانات السحابية بسبب: ${driverError.message}\nقد يظهر السائق مرة أخرى بعد المزامنة القادمة. برجاء مراجعة الفني.`);
+          }
+        } catch (e: any) {
+          console.error("Supabase cascade delete driver error:", e);
+        }
+      })();
     }
   };
 
@@ -1251,13 +1275,41 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   const deleteCar = (id: string) => {
+    // نفك ارتباط الفواتير وبنود الفواتير بالسيارة دي قبل حذفها، عشان مانمسحش سجلات مالية
+    // بس في نفس الوقت مانسيبهاش مربوطة بمعرف سيارة محذوف (ده اللي بيخلي الحذف يترفض في السحابة
+    // بسبب قيد Foreign Key، وترجع السيارة تظهر تاني بعد أول مزامنة)
+    const affectedInvoiceIds = invoices.filter(inv => inv.car_id === id).map(inv => inv.id);
+    const affectedInvoiceItemIds = invoiceItems.filter(it => it.car_id === id).map(it => it.id);
+
     setCars(prev => prev.filter(c => c.id !== id));
+    if (affectedInvoiceIds.length > 0) {
+      setInvoices(prev => prev.map(inv => inv.car_id === id ? { ...inv, car_id: undefined } : inv));
+    }
+    if (affectedInvoiceItemIds.length > 0) {
+      setInvoiceItems(prev => prev.map(it => it.car_id === id ? { ...it, car_id: '' } : it));
+    }
 
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
-      supabase.from('cars').delete().eq('id', id).then(({ error }) => {
-        if (error) console.error("Supabase delete car error:", error);
-      });
+      (async () => {
+        try {
+          if (affectedInvoiceIds.length > 0) {
+            const { error } = await supabase.from('invoices').update({ car_id: null }).eq('car_id', id);
+            if (error) console.error("Supabase unlink invoices from car error:", error);
+          }
+          if (affectedInvoiceItemIds.length > 0) {
+            const { error } = await supabase.from('invoice_items').update({ car_id: null }).eq('car_id', id);
+            if (error) console.error("Supabase unlink invoice_items from car error:", error);
+          }
+          const { error: carError } = await supabase.from('cars').delete().eq('id', id);
+          if (carError) {
+            console.error("Supabase delete car error:", carError);
+            alert(`تنبيه: تم حذف السيارة من الشاشة لكن فشل حذفها نهائياً من قاعدة البيانات السحابية بسبب: ${carError.message}\nقد تظهر السيارة مرة أخرى بعد المزامنة القادمة. برجاء مراجعة الفني.`);
+          }
+        } catch (e: any) {
+          console.error("Supabase cascade delete car error:", e);
+        }
+      })();
     }
   };
 

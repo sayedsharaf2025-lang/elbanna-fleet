@@ -10,7 +10,7 @@ import { Invoice, InvoiceItem, Driver, Official, DriverAccountMovement } from '.
 
 interface A5PrintPreviewProps {
   id?: string;
-  type: 'invoice' | 'deduction' | 'statement' | 'custody_statement';
+  type: 'invoice' | 'deduction' | 'statement' | 'custody_statement' | 'batch_deductions';
   invoiceData?: {
     invoice: Invoice;
     items: InvoiceItem[];
@@ -37,6 +37,15 @@ interface A5PrintPreviewProps {
     balance: number;
     movements: any[];
   };
+  batchDeductionsData?: {
+    statementDate: string; // تاريخ الكشف
+    entries: Array<{
+      driver_code: string;
+      driver_name: string;
+      amount: number;   // المبلغ المخصوم
+      remaining: number; // المتبقي بعد الخصم
+    }>;
+  };
   onClose: () => void;
 }
 
@@ -46,6 +55,7 @@ export const A5PrintPreview: React.FC<A5PrintPreviewProps> = ({
   deductionData,
   statementData,
   custodyData,
+  batchDeductionsData,
   onClose
 }) => {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -168,6 +178,7 @@ export const A5PrintPreview: React.FC<A5PrintPreviewProps> = ({
                   {type === 'deduction' && 'كشف مالي - إشعار خصم سائق مستقطع'}
                   {type === 'statement' && `كشف حساب حركة الخصومات والمستحقات بالسائق`}
                   {type === 'custody_statement' && `كشف حساب فرعي وحركات عهدة`}
+                  {type === 'batch_deductions' && `كشف إجمالي بحركات الخصم المسجلة على السائقين`}
                 </h2>
               </div>
             )}
@@ -376,6 +387,67 @@ export const A5PrintPreview: React.FC<A5PrintPreviewProps> = ({
                       )}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {/* 3.5 BATCH DEDUCTIONS CONSOLIDATED STATEMENT */}
+            {type === 'batch_deductions' && batchDeductionsData && (
+              <div className="space-y-3">
+                <div className="bg-slate-50 p-2 rounded border border-slate-200 flex items-center justify-between text-[10px]">
+                  <div><span className="text-slate-600">تاريخ الكشف:</span> <span className="font-bold text-slate-950 font-mono">{batchDeductionsData.statementDate}</span></div>
+                  <div><span className="text-slate-600">عدد الحركات:</span> <span className="font-bold text-slate-950 font-mono">{batchDeductionsData.entries.length}</span></div>
+                </div>
+
+                <div className="mt-3">
+                  <table className="w-full text-right border-collapse text-[9px] border border-slate-200">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-900 border-b border-slate-300 font-bold">
+                        <th className="py-1.5 px-1.5 border border-slate-200">تاريخ الكشف</th>
+                        <th className="py-1.5 px-1.5 border border-slate-200">كود السائق</th>
+                        <th className="py-1.5 px-1.5 border border-slate-200">اسم السائق</th>
+                        <th className="py-1.5 px-1.5 border border-slate-200 text-left">المبلغ المخصوم</th>
+                        <th className="py-1.5 px-1.5 border border-slate-200 text-left">المتبقي</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {batchDeductionsData.entries.length > 0 ? batchDeductionsData.entries.map((en, idx) => (
+                        <tr key={idx} className="border-b border-slate-200 hover:bg-slate-50 text-slate-800">
+                          <td className="py-1.5 px-1.5 border border-slate-200 font-mono">{batchDeductionsData.statementDate}</td>
+                          <td className="py-1.5 px-1.5 border border-slate-200 font-mono font-bold">{en.driver_code}</td>
+                          <td className="py-1.5 px-1.5 border border-slate-200 font-medium">{en.driver_name}</td>
+                          <td className="py-1.5 px-1.5 border border-slate-200 text-left font-mono font-bold text-rose-700">{en.amount.toLocaleString()} ج.م</td>
+                          <td className="py-1.5 px-1.5 border border-slate-200 text-left font-mono font-semibold text-slate-900">{en.remaining.toLocaleString()} ج.م</td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={5} className="py-4 text-center text-slate-400">لا توجد حركات خصم مسجلة في هذا الكشف.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                    {batchDeductionsData.entries.length > 0 && (
+                      <tfoot>
+                        <tr className="font-black bg-slate-50 text-slate-950 text-[10px]">
+                          <td colSpan={3} className="py-1.5 px-1.5 border border-slate-200 text-right">الإجمالي الكلي للخصومات:</td>
+                          <td className="py-1.5 px-1.5 border border-slate-200 text-left font-mono text-rose-700">
+                            {batchDeductionsData.entries.reduce((sum, en) => sum + en.amount, 0).toLocaleString()} ج.م
+                          </td>
+                          <td className="py-1.5 px-1.5 border border-slate-200"></td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+
+                <div className="mt-8 grid grid-cols-2 gap-4 border-t border-slate-300 pt-4 text-[9px] text-slate-650 text-center font-bold">
+                  <div>
+                    <p className="font-bold text-slate-800">محاسب النقليات</p>
+                    <div className="h-10 border-b border-dashed border-slate-300"></div>
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-800">اعتماد مدير الحركة</p>
+                    <div className="h-10 border-b border-dashed border-slate-300"></div>
+                  </div>
                 </div>
               </div>
             )}
