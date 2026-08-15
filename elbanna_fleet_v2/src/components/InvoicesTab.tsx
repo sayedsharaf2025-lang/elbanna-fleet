@@ -160,6 +160,9 @@ export const InvoicesTab: React.FC = () => {
     }
   ]);
 
+  // نص البحث عن السيارة المستهدفة، لكل مسودة صرف على حدة
+  const [carSearchInputs, setCarSearchInputs] = useState<Record<string, string>>({});
+
   // تحميل المسودات عند الفتح (من السحابة أو المحلي)
   React.useEffect(() => {
     db.loadDraftVouchers().then(saved => {
@@ -1070,6 +1073,11 @@ export const InvoicesTab: React.FC = () => {
               </button>
             </div>
 
+            {/* قائمة بحث موحّدة لأرقام السيارات — تُستخدم لتسهيل اختيار السيارة المستهدفة بالصرف */}
+            <datalist id="draft-vouchers-cars-datalist">
+              {db.cars.map(c => <option key={c.id} value={c.car_number} />)}
+            </datalist>
+
             {/* List draft vouchers side by side or vertical bento stack */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               {draftVouchers.map((v, index) => {
@@ -1119,17 +1127,37 @@ export const InvoicesTab: React.FC = () => {
 
                       <div>
                         <label className="block text-slate-400 font-bold mb-1">السيارة الواحدة المستهدفة للطباعة والصرف</label>
-                        <select
-                          required
-                          className="w-full p-2 rounded-lg border border-slate-800 bg-slate-950 text-slate-100 font-bold"
-                          value={v.carId}
-                          onChange={(e) => handleUpdateDraftHeader(v.id, 'carId', e.target.value)}
-                        >
-                          <option value="">-- اختر السيارة بالفاتورة --</option>
-                          {db.cars.map(c => (
-                            <option key={c.id} value={c.id}>{c.car_number} ({c.owner_company.split(' ')[0]})</option>
-                          ))}
-                        </select>
+                        {(() => {
+                          const selectedCar = db.cars.find(c => c.id === v.carId);
+                          const searchVal = carSearchInputs[v.id] !== undefined ? carSearchInputs[v.id] : (selectedCar?.car_number || '');
+                          const cleanedSearch = searchVal.replace(/\s/g, '');
+                          const exactMatch = cleanedSearch ? db.cars.find(c => c.car_number.replace(/\s/g, '') === cleanedSearch) : undefined;
+                          return (
+                            <>
+                              <input
+                                type="text"
+                                required
+                                placeholder="اكتب رقم السيارة للبحث..."
+                                list="draft-vouchers-cars-datalist"
+                                autoComplete="off"
+                                className="w-full p-2 rounded-lg border border-slate-800 bg-slate-950 text-slate-100 font-bold"
+                                value={searchVal}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setCarSearchInputs(prev => ({ ...prev, [v.id]: val }));
+                                  const cleaned = val.replace(/\s/g, '');
+                                  const matched = cleaned ? db.cars.find(c => c.car_number.replace(/\s/g, '') === cleaned) : undefined;
+                                  handleUpdateDraftHeader(v.id, 'carId', matched ? matched.id : '');
+                                }}
+                              />
+                              {searchVal && (
+                                <p className={`mt-1 text-[10px] font-bold ${exactMatch ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  {exactMatch ? `✅ ${exactMatch.car_number} (${exactMatch.owner_company.split(' ')[0]})` : '❌ لا توجد سيارة بهذا الرقم في النظام'}
+                                </p>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
 
                       <div>

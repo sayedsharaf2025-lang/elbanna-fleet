@@ -121,6 +121,7 @@ interface DbContextType {
   setCloudError: (val: string | null) => void;
   testCloudConnection: () => Promise<{ success: boolean; message: string }>;
   uploadLocalDataToCloud: () => Promise<{ success: boolean; message: string }>;
+  validateLocalData: () => string[];
   downloadCloudDataToLocal: (isManual?: boolean) => Promise<{ success: boolean; message: string }>;
 
   // Driver Actions
@@ -864,6 +865,59 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   // Upload Current Local State to Cloud (Dumping / Syncing)
+  // فحص دقة البيانات محليًا قبل الرفع للسحابة — بيرصد أي بيانات ناقصة أو متضاربة
+  // يمكن تمنع رفع بعض السجلات (زي تكرار مخالفة بنفس السيارة والتاريخ) أو تكون غير دقيقة
+  const validateLocalData = (): string[] => {
+    const issues: string[] = [];
+    const driverIds = new Set(drivers.map(d => d.id));
+    const carNumbers = new Set(cars.map(c => (c.car_number || '').trim()).filter(Boolean));
+
+    // السيارات: أرقام لوحات ناقصة
+    const carsMissingNumber = cars.filter(c => !((c.car_number || '').trim()));
+    if (carsMissingNumber.length > 0) {
+      issues.push(`⚠️ يوجد ${carsMissingNumber.length} سيارة بدون رقم لوحة مسجل.`);
+    }
+
+    // المخالفات: تواريخ أو مبالغ ناقصة، سيارة أو سائق غير مرتبطين، وتكرار (سيارة + تاريخ)
+    const violationsMissingDate = violations.filter(v => !((v.violation_date || '').trim()));
+    if (violationsMissingDate.length > 0) {
+      issues.push(`⚠️ يوجد ${violationsMissingDate.length} مخالفة بدون تاريخ مسجل (سيتم استخدام تاريخ افتراضي عند الرفع).`);
+    }
+    const violationsMissingAmount = violations.filter(v => !v.amount || v.amount <= 0);
+    if (violationsMissingAmount.length > 0) {
+      issues.push(`⚠️ يوجد ${violationsMissingAmount.length} مخالفة بمبلغ خصم صفر أو غير صحيح.`);
+    }
+    const violationsUnknownCar = violations.filter(v => v.car_number && !carNumbers.has(v.car_number.trim()));
+    if (violationsUnknownCar.length > 0) {
+      issues.push(`⚠️ يوجد ${violationsUnknownCar.length} مخالفة مرتبطة برقم سيارة غير مسجل في شاشة السيارات.`);
+    }
+    const violationsUnknownDriver = violations.filter(v => v.driver_id && !driverIds.has(v.driver_id));
+    if (violationsUnknownDriver.length > 0) {
+      issues.push(`⚠️ يوجد ${violationsUnknownDriver.length} مخالفة مرتبطة بسائق محذوف أو غير موجود.`);
+    }
+    const violationDupKeys = new Map<string, number>();
+    violations.forEach(v => {
+      const key = `${(v.car_number || '').trim()}|${(v.violation_date || '').trim()}`;
+      violationDupKeys.set(key, (violationDupKeys.get(key) || 0) + 1);
+    });
+    const dupCount = [...violationDupKeys.values()].filter(c => c > 1).length;
+    if (dupCount > 0) {
+      issues.push(`🔴 يوجد ${dupCount} حالة تكرار (نفس السيارة + نفس تاريخ المخالفة) — هذا قد يمنع رفع المخالفات بسبب قيد unique_violation_date_car في السحابة. استخدم "كود الإصلاح السريع" بشاشة Supabase لإسقاط هذا القيد لو كان تكرار مخالفتين بنفس اليوم أمر طبيعي عندكم.`);
+    }
+
+    // حركات الخصم: سائق غير موجود، أو مبلغ خصم صفري
+    const movementsUnknownDriver = movements.filter(m => m.driver_id && !driverIds.has(m.driver_id));
+    if (movementsUnknownDriver.length > 0) {
+      issues.push(`⚠️ يوجد ${movementsUnknownDriver.length} حركة خصم/رصيد مرتبطة بسائق محذوف أو غير موجود.`);
+    }
+    const movementsZeroAmount = movements.filter(m => !m.amount_change);
+    if (movementsZeroAmount.length > 0) {
+      issues.push(`⚠️ يوجد ${movementsZeroAmount.length} حركة خصم بقيمة صفر.`);
+    }
+
+    return issues;
+  };
+
   const uploadLocalDataToCloud = async (): Promise<{ success: boolean; message: string }> => {
     const supabase = getSupabaseClient();
     if (!supabase) {
@@ -2922,6 +2976,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setCloudError,
         testCloudConnection,
         uploadLocalDataToCloud,
+        validateLocalData,
         downloadCloudDataToLocal,
         addDriver,
         updateDriver,

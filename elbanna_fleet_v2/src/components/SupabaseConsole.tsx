@@ -22,12 +22,13 @@ import {
   Link2, 
   AlertCircle, 
   Upload, 
-  Download 
-} from 'lucide-react';
+  Download,
+  Search} from 'lucide-react';
 
 export const SupabaseConsole: React.FC = () => {
   const db = useDb();
   const [activeTab, setActiveTab] = useState<'settings' | 'tables' | 'sql' | 'rules' | 'rpc'>('settings');
+  const [dataIssues, setDataIssues] = useState<string[] | null>(null);
   const [isExportingCloud, setIsExportingCloud] = useState(false);
   const [selectedTable, setSelectedTable] = useState<'cars' | 'drivers' | 'officials' | 'violations' | 'invoices' | 'logs'>('cars');
   const [rawSqlQuery, setRawSqlQuery] = useState<string>('SELECT * FROM cars WHERE license_end_date <= CURRENT_DATE + INTERVAL \'30 days\';');
@@ -539,11 +540,13 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);`;
 
                     <div className="bg-slate-950 p-5 rounded-2xl border border-slate-800 space-y-3">
                     <h5 className="font-bold text-slate-205 text-xs text-emerald-400">عمليات المزامنة اليدوية وإدارة العهد</h5>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <button
                         type="button"
                         onClick={async () => {
-                          if (confirm("هل ترغب في رفع كل ما تملكه من سيارات، وسائقين، وعهد فرعية موجودة على هذا الجهاز وقواعد البيانات المحلية لتخزينها بالسحاب فورًا؟ هذا يغطي كافة الأجهزة الأخرى.")) {
+                          const issues = db.validateLocalData();
+                          const issuesText = issues.length > 0 ? `\n\n⚠️ ملحوظات على البيانات قبل الرفع:\n${issues.join('\n')}\n\nهل تريد المتابعة والرفع رغم ذلك؟` : '';
+                          if (confirm(`هل ترغب في رفع كل ما تملكه من سيارات، وسائقين، وعهد فرعية موجودة على هذا الجهاز وقواعد البيانات المحلية لتخزينها بالسحاب فورًا؟ هذا يغطي كافة الأجهزة الأخرى.${issuesText}`)) {
                             const res = await db.uploadLocalDataToCloud();
                             alert(res.message);
                           }
@@ -552,7 +555,7 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);`;
                       >
                         <Upload className="w-5 h-5 text-emerald-400 mb-1.5 group-hover:scale-110 transition-transform" />
                         <div className="font-bold text-xs text-slate-200">تصدير الحالي للسحابة</div>
-                        <p className="text-[10px] text-slate-500 mt-1">تفريغ ورفع بيانات جهازك الفردية للسيرفر الموحد</p>
+                        <p className="text-[10px] text-slate-500 mt-1">تفريغ ورفع بيانات جهازك الفردية للسيرفر الموحد (سيارات، مخالفات، خصومات، إلخ)</p>
                       </button>
 
                       <button
@@ -569,7 +572,32 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);`;
                         <div className="font-bold text-xs text-slate-200">تحميل واستيراد السحب</div>
                         <p className="text-[10px] text-slate-500 mt-1">سحب وجلب البيانات السحابية المسجلة من هواتف وتجهيزات أخرى</p>
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setDataIssues(db.validateLocalData())}
+                        className="bg-slate-900 hover:bg-slate-850 border border-slate-800 rounded-xl p-3 text-right group transition-all"
+                      >
+                        <Search className="w-5 h-5 text-amber-400 mb-1.5 group-hover:scale-110 transition-transform" />
+                        <div className="font-bold text-xs text-slate-200">فحص دقة البيانات</div>
+                        <p className="text-[10px] text-slate-500 mt-1">مراجعة السيارات والمخالفات والخصومات لأي بيانات ناقصة أو متكررة قبل الرفع</p>
+                      </button>
                     </div>
+
+                    {dataIssues !== null && (
+                      <div className={`p-3 rounded-xl text-[11px] space-y-1.5 border ${dataIssues.length === 0 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'}`}>
+                        {dataIssues.length === 0 ? (
+                          <p className="font-bold flex items-center gap-1.5"><CheckCircle className="w-3.5 h-3.5" /> كل البيانات المحلية سليمة ولا يوجد أي ملاحظات، جاهزة للرفع بأمان.</p>
+                        ) : (
+                          <>
+                            <p className="font-bold text-slate-200">تم رصد {dataIssues.length} ملاحظة على البيانات المحلية:</p>
+                            <ul className="space-y-1 pr-1">
+                              {dataIssues.map((issue, i) => <li key={i}>{issue}</li>)}
+                            </ul>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                   </div>
                 )}
