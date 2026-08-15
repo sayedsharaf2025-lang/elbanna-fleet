@@ -122,6 +122,13 @@ interface DbContextType {
   testCloudConnection: () => Promise<{ success: boolean; message: string }>;
   uploadLocalDataToCloud: () => Promise<{ success: boolean; message: string }>;
   validateLocalData: () => string[];
+  getDataIssuesDetail: () => {
+    unknownCarGroups: { car_number: string; items: Violation[] }[];
+    orphanedDriverViolations: Violation[];
+    duplicateGroups: Violation[][];
+  };
+  updateViolation: (id: string, updatedFields: Partial<Violation>) => void;
+  remapViolationsCarNumber: (oldCarNumber: string, newCarNumber: string) => void;
   downloadCloudDataToLocal: (isManual?: boolean) => Promise<{ success: boolean; message: string }>;
 
   // Driver Actions
@@ -916,6 +923,64 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
 
     return issues;
+  };
+
+  // نسخة تفصيلية ومُجهّزة للمعالجة التفاعلية — بترجع مجموعات فعلية (مش عدد بس)
+  // عشان شاشة "معالجة مشاكل البيانات" تقدر تعرض كل حالة وتوفر إجراء لحلها
+  const getDataIssuesDetail = () => {
+    const driverIds = new Set(drivers.map(d => d.id));
+    const carNumbers = new Set(cars.map(c => (c.car_number || '').trim()).filter(Boolean));
+
+    // مجموعات المخالفات المرتبطة برقم سيارة غير مسجل، مجمّعة حسب رقم السيارة
+    const unknownCarGroups = new Map<string, Violation[]>();
+    violations.forEach(v => {
+      const num = (v.car_number || '').trim();
+      if (num && !carNumbers.has(num)) {
+        if (!unknownCarGroups.has(num)) unknownCarGroups.set(num, []);
+        unknownCarGroups.get(num)!.push(v);
+      }
+    });
+
+    const orphanedDriverViolations = violations.filter(v => v.driver_id && !driverIds.has(v.driver_id));
+
+    const dupGroupsMap = new Map<string, Violation[]>();
+    violations.forEach(v => {
+      const key = `${(v.car_number || '').trim()}|${(v.violation_date || '').trim()}`;
+      if (!dupGroupsMap.has(key)) dupGroupsMap.set(key, []);
+      dupGroupsMap.get(key)!.push(v);
+    });
+    const duplicateGroups = [...dupGroupsMap.values()].filter(g => g.length > 1);
+
+    return {
+      unknownCarGroups: [...unknownCarGroups.entries()].map(([car_number, items]) => ({ car_number, items })),
+      orphanedDriverViolations,
+      duplicateGroups
+    };
+  };
+
+  // تحديث بيانات مخالفة موجودة (مثال: إعادة ربطها بسائق صحيح بعد ما كانت مرتبطة بسائق محذوف)
+  const updateViolation = (id: string, updatedFields: Partial<Violation>) => {
+    setViolations(prev => prev.map(v => v.id === id ? { ...v, ...updatedFields } : v));
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('violations').update(updatedFields).eq('id', id).then(({ error }) => {
+        if (error) console.error("Supabase update violation error:", error);
+      });
+    }
+  };
+
+  // إعادة ربط كل المخالفات المسجلة برقم سيارة معين (غير مسجل) لرقم سيارة آخر دفعة واحدة
+  // مفيد لما يكون رقم السيارة بالمخالفات مكتوب بصيغة مختلفة عن رقم نفس السيارة المسجل بشاشة السيارات
+  const remapViolationsCarNumber = (oldCarNumber: string, newCarNumber: string) => {
+    setViolations(prev => prev.map(v => v.car_number === oldCarNumber ? { ...v, car_number: newCarNumber } : v));
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('violations').update({ car_number: newCarNumber }).eq('car_number', oldCarNumber).then(({ error }) => {
+        if (error) console.error("Supabase remap violations car_number error:", error);
+      });
+    }
   };
 
   const uploadLocalDataToCloud = async (): Promise<{ success: boolean; message: string }> => {
@@ -2977,6 +3042,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         testCloudConnection,
         uploadLocalDataToCloud,
         validateLocalData,
+        getDataIssuesDetail,
+        updateViolation,
+        remapViolationsCarNumber,
         downloadCloudDataToLocal,
         addDriver,
         updateDriver,

@@ -29,6 +29,12 @@ export const SupabaseConsole: React.FC = () => {
   const db = useDb();
   const [activeTab, setActiveTab] = useState<'settings' | 'tables' | 'sql' | 'rules' | 'rpc'>('settings');
   const [dataIssues, setDataIssues] = useState<string[] | null>(null);
+  const [cleanupDetail, setCleanupDetail] = useState<ReturnType<typeof db.getDataIssuesDetail> | null>(null);
+  const [remapSearch, setRemapSearch] = useState<Record<string, string>>({});
+  const [quickAddOpen, setQuickAddOpen] = useState<Record<string, boolean>>({});
+  const [quickAddCompany, setQuickAddCompany] = useState<Record<string, string>>({});
+  const [reassignDriver, setReassignDriver] = useState<Record<string, string>>({});
+  const refreshCleanup = () => setCleanupDetail(db.getDataIssuesDetail());
   const [isExportingCloud, setIsExportingCloud] = useState(false);
   const [selectedTable, setSelectedTable] = useState<'cars' | 'drivers' | 'officials' | 'violations' | 'invoices' | 'logs'>('cars');
   const [rawSqlQuery, setRawSqlQuery] = useState<string>('SELECT * FROM cars WHERE license_end_date <= CURRENT_DATE + INTERVAL \'30 days\';');
@@ -594,7 +600,204 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);`;
                             <ul className="space-y-1 pr-1">
                               {dataIssues.map((issue, i) => <li key={i}>{issue}</li>)}
                             </ul>
+                            <button
+                              type="button"
+                              onClick={refreshCleanup}
+                              className="mt-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-200 font-bold px-3 py-1.5 rounded-lg text-[11px]"
+                            >
+                              🛠 عرض ومعالجة المشاكل بالتفصيل
+                            </button>
                           </>
+                        )}
+                      </div>
+                    )}
+
+                    {/* لوحة معالجة تفصيلية — لكل مشكلة إجراء مباشر لحلها بدل المراجعة اليدوية سجل سجل */}
+                    {cleanupDetail && (
+                      <div className="space-y-4 border-t border-slate-800 pt-4">
+
+                        {/* 1) مخالفات مرتبطة برقم سيارة غير مسجل */}
+                        {cleanupDetail.unknownCarGroups.length > 0 && (
+                          <div className="space-y-2">
+                            <h6 className="font-bold text-xs text-red-400">🚗 أرقام سيارات غير مسجلة ({cleanupDetail.unknownCarGroups.length} رقم مختلف)</h6>
+                            <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                              {cleanupDetail.unknownCarGroups.map(group => {
+                                const key = group.car_number;
+                                const search = remapSearch[key] || '';
+                                const cleaned = search.replace(/\s/g, '');
+                                const matched = cleaned ? db.cars.find(c => c.car_number.replace(/\s/g, '') === cleaned) : undefined;
+                                const totalAmount = group.items.reduce((s, v) => s + (v.amount || 0), 0);
+                                return (
+                                  <div key={key} className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <div>
+                                        <span className="font-mono font-bold text-slate-100">{key}</span>
+                                        <span className="text-slate-500 text-[10px] mr-2">({group.items.length} مخالفة — إجمالي {totalAmount.toLocaleString()} ج.م)</span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => setQuickAddOpen(prev => ({ ...prev, [key]: !prev[key] }))}
+                                        className="text-[10px] bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-bold px-2.5 py-1 rounded-lg"
+                                      >
+                                        ➕ تسجيلها كسيارة جديدة
+                                      </button>
+                                    </div>
+
+                                    {quickAddOpen[key] && (
+                                      <div className="flex items-center gap-2 bg-slate-950 p-2 rounded-lg">
+                                        <input
+                                          type="text"
+                                          placeholder="اسم الشركة المالكة (اختياري)"
+                                          value={quickAddCompany[key] || ''}
+                                          onChange={(e) => setQuickAddCompany(prev => ({ ...prev, [key]: e.target.value }))}
+                                          className="flex-1 p-1.5 rounded-lg border border-slate-800 bg-slate-900 text-slate-100 text-[11px]"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            db.addCar({
+                                              car_number: key,
+                                              chassis_number: '',
+                                              motor_number: '',
+                                              owner_company: (quickAddCompany[key] || '').trim() || 'غير محدد',
+                                              license_official_id: '',
+                                              driver_id: '',
+                                              license_end_date: '',
+                                              insurance_status: 'غير محدد',
+                                              extinguisher_status: 'warning'
+                                            });
+                                            setQuickAddOpen(prev => ({ ...prev, [key]: false }));
+                                            refreshCleanup();
+                                          }}
+                                          className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg"
+                                        >
+                                          حفظ السيارة
+                                        </button>
+                                      </div>
+                                    )}
+
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        list="cleanup-cars-datalist"
+                                        placeholder="أو اربطها برقم سيارة مسجل فعلاً..."
+                                        autoComplete="off"
+                                        value={search}
+                                        onChange={(e) => setRemapSearch(prev => ({ ...prev, [key]: e.target.value }))}
+                                        className="flex-1 p-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-100 text-[11px]"
+                                      />
+                                      <button
+                                        type="button"
+                                        disabled={!matched}
+                                        onClick={() => {
+                                          if (!matched) return;
+                                          db.remapViolationsCarNumber(key, matched.car_number);
+                                          refreshCleanup();
+                                        }}
+                                        className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg"
+                                      >
+                                        ربط بهذه السيارة
+                                      </button>
+                                    </div>
+                                    {search && (
+                                      <p className={`text-[10px] font-bold ${matched ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        {matched ? `✅ سيتم ربط كل مخالفات (${key}) برقم السيارة الموجود: ${matched.car_number}` : '❌ لا توجد سيارة بهذا الرقم'}
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <datalist id="cleanup-cars-datalist">
+                              {db.cars.map(c => <option key={c.id} value={c.car_number} />)}
+                            </datalist>
+                          </div>
+                        )}
+
+                        {/* 2) مخالفات مرتبطة بسائق محذوف */}
+                        {cleanupDetail.orphanedDriverViolations.length > 0 && (
+                          <div className="space-y-2">
+                            <h6 className="font-bold text-xs text-amber-400">👤 مخالفات مرتبطة بسائق محذوف ({cleanupDetail.orphanedDriverViolations.length})</h6>
+                            <div className="space-y-2">
+                              {cleanupDetail.orphanedDriverViolations.map(v => (
+                                <div key={v.id} className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-2">
+                                  <div className="text-[11px] text-slate-300">
+                                    <span className="font-mono font-bold text-slate-100">{v.car_number}</span> — {v.violation_date} — {v.description} — <span className="text-red-300 font-bold">{v.amount?.toLocaleString()} ج.م</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <select
+                                      value={reassignDriver[v.id] || ''}
+                                      onChange={(e) => setReassignDriver(prev => ({ ...prev, [v.id]: e.target.value }))}
+                                      className="flex-1 p-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-100 text-[11px]"
+                                    >
+                                      <option value="">-- اختر السائق الصحيح لإعادة الربط --</option>
+                                      {db.drivers.map(d => <option key={d.id} value={d.id}>{d.name} ({d.driver_code})</option>)}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      disabled={!reassignDriver[v.id]}
+                                      onClick={() => {
+                                        db.updateViolation(v.id, { driver_id: reassignDriver[v.id] });
+                                        refreshCleanup();
+                                      }}
+                                      className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg"
+                                    >
+                                      إعادة الربط
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (confirm('حذف هذه المخالفة نهائياً؟ (لن يمكن التراجع)')) {
+                                          db.deleteViolation(v.id);
+                                          refreshCleanup();
+                                        }
+                                      }}
+                                      className="bg-red-950/50 hover:bg-red-900/50 border border-red-900/40 text-red-300 text-[11px] font-bold px-3 py-1.5 rounded-lg"
+                                    >
+                                      حذف
+                                    </button>
+                                  </div>
+                                  <p className="text-[10px] text-slate-500">ملحوظة: إعادة الربط تغيّر صاحب المخالفة فقط، ولن تُعدّل رصيد أي سائق تلقائياً — راجع رصيد السائق الجديد يدويًا لو لزم.</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 3) مخالفات مكررة (نفس السيارة + نفس التاريخ) */}
+                        {cleanupDetail.duplicateGroups.length > 0 && (
+                          <div className="space-y-2">
+                            <h6 className="font-bold text-xs text-rose-400">🔁 حالات تكرار (نفس السيارة + نفس التاريخ) ({cleanupDetail.duplicateGroups.length} حالة)</h6>
+                            <p className="text-[10px] text-slate-500">راجع كل مجموعة: لو مخالفتين حقيقيتين بنفس اليوم اتركهم زي ما هما واستخدم "كود الإصلاح السريع" لإسقاط القيد من السحابة. لو تكرار خطأ، احذف الزيادة.</p>
+                            <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                              {cleanupDetail.duplicateGroups.map((group, gi) => (
+                                <div key={gi} className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-1.5">
+                                  <div className="text-[11px] font-bold text-slate-200">{group[0].car_number} — {group[0].violation_date}</div>
+                                  {group.map(v => (
+                                    <div key={v.id} className="flex items-center justify-between text-[11px] text-slate-300 bg-slate-950 rounded-lg px-2 py-1.5">
+                                      <span>{v.description} — <span className="text-red-300 font-bold">{v.amount?.toLocaleString()} ج.م</span></span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (confirm('حذف هذه المخالفة المكررة؟')) {
+                                            db.deleteViolation(v.id);
+                                            refreshCleanup();
+                                          }
+                                        }}
+                                        className="bg-red-950/50 hover:bg-red-900/50 border border-red-900/40 text-red-300 text-[10px] font-bold px-2 py-1 rounded-lg"
+                                      >
+                                        حذف
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {cleanupDetail.unknownCarGroups.length === 0 && cleanupDetail.orphanedDriverViolations.length === 0 && cleanupDetail.duplicateGroups.length === 0 && (
+                          <p className="text-[11px] text-emerald-400 font-bold">✅ تمت معالجة كل المشاكل القابلة للحل تلقائياً هنا.</p>
                         )}
                       </div>
                     )}
