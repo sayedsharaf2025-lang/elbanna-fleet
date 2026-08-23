@@ -89,7 +89,6 @@ function DashboardLayout() {
       items: [
         { id: 'violations' as const, label: 'تسجيل المخالفات وتفادي التكرار', icon: AlertTriangle },
         { id: 'license_tracking' as const, label: 'متابعة وتحديث التراخيص المتقدمة', icon: CalendarCheck },
-        { id: 'custody_licensing' as const, label: 'فواتير تراخيص', icon: Receipt },
       ]
     },
     {
@@ -97,6 +96,12 @@ function DashboardLayout() {
       items: [
         { id: 'deductions' as const, label: 'الخصومات الفردية والجماعية', icon: CreditCard },
         { id: 'cross_accounts' as const, label: 'أرشيف وحسابات السائقين (شهرية)', icon: FileSpreadsheet },
+      ]
+    },
+    {
+      type: 'group' as const, label: 'الصيانة', icon: Receipt,
+      items: [
+        { id: 'custody_licensing' as const, label: 'العهد الصرف وتسوية الفواتير', icon: Receipt },
       ]
     },
     { type: 'standalone' as const, id: 'reports' as const, label: 'شاشة التقارير والمطبوعات الموحدة', icon: FileText },
