@@ -714,12 +714,13 @@ export const CarsDriversTab: React.FC = () => {
   );
 
   // List of all companies dynamically combined: from database store + registered in all cars currently in local db
+  // مع استبعاد أي شركة تم حذفها عمداً حتى لو لسه موجودة كـ owner_company بسيارات قديمة
   const allCompaniesCombined = Array.from(
     new Set([
       ...db.companies,
       ...db.cars.map(c => c.owner_company).filter(Boolean)
     ])
-  );
+  ).filter(c => !db.hiddenCompanies.includes(c));
 
   return (
     <div className="space-y-6" id="cars_drivers_tab" style={{ direction: 'rtl' }}>

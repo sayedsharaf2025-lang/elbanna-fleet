@@ -31,9 +31,7 @@ import {
   X,
   CreditCard,
   FileText,
-  Users,
-  Settings,
-  Activity
+  Users
 } from 'lucide-react';
 
 function DashboardLayout() {
@@ -74,33 +72,19 @@ function DashboardLayout() {
     return () => clearInterval(timer);
   }, []);
 
-  // هيكل التنقل: شاشتين مستقلتين (الرئيسية والتقارير) + أربع مجموعات رئيسية تحوي باقي الشاشات
-  const navStructure = [
-    { type: 'standalone' as const, id: 'dashboard' as const, label: 'لوحة التحكم والتحليلات الحية', icon: LayoutDashboard },
-    {
-      type: 'group' as const, label: 'الإعدادات', icon: Settings,
-      items: [
-        { id: 'users_settings' as const, label: 'حماية وإعدادات حسابات النظام', icon: Users },
-        { id: 'fleet' as const, label: 'إعدادات السيارات والسائقين (Excel)', icon: Truck },
-      ]
-    },
-    {
-      type: 'group' as const, label: 'الحركة', icon: Activity,
-      items: [
-        { id: 'violations' as const, label: 'تسجيل المخالفات وتفادي التكرار', icon: AlertTriangle },
-        { id: 'license_tracking' as const, label: 'متابعة وتحديث التراخيص المتقدمة', icon: CalendarCheck },
-        { id: 'custody_licensing' as const, label: 'فواتير تراخيص', icon: Receipt },
-      ]
-    },
-    {
-      type: 'group' as const, label: 'المالية', icon: CreditCard,
-      items: [
-        { id: 'deductions' as const, label: 'الخصومات الفردية والجماعية', icon: CreditCard },
-        { id: 'cross_accounts' as const, label: 'أرشيف وحسابات السائقين (شهرية)', icon: FileSpreadsheet },
-      ]
-    },
-    { type: 'standalone' as const, id: 'reports' as const, label: 'شاشة التقارير والمطبوعات الموحدة', icon: FileText },
-  ];
+  const tabItems = [
+    { id: 'dashboard', label: 'لوحة التحكم والتحليلات الحية', icon: LayoutDashboard },
+    { id: 'fleet', label: 'إعدادات السيارات والسائقين (Excel)', icon: Truck },
+    { id: 'violations', label: 'تسجيل المخالفات وتفادي التكرار', icon: AlertTriangle },
+    { id: 'deductions', label: 'الخصومات الفردية والجماعية', icon: CreditCard },
+    { id: 'custody_licensing', label: 'العهد الصرف وتسوية الفواتير', icon: Receipt },
+    { id: 'cross_accounts', label: 'أرشيف وحسابات السائقين (شهرية)', icon: FileSpreadsheet },
+    { id: 'license_tracking', label: 'متابعة وتحديث التراخيص المتقدمة', icon: CalendarCheck },
+    { id: 'reports', label: 'شاشة التقارير والمطبوعات الموحدة', icon: FileText },
+    { id: 'users_settings', label: 'حماية وإعدادات حسابات النظام', icon: Users }
+  ] as const;
+
+  const visibleTabItems = tabItems.filter(item => allowedTabs.includes(item.id));
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans relative pb-16">
@@ -190,63 +174,30 @@ function DashboardLayout() {
           id="elbanna_sidebar"
         >
           <div className="space-y-4">
-            <div className="flex justify-end items-center lg:hidden border-b border-slate-800 pb-2">
+            <div className="flex justify-between items-center lg:hidden border-b border-slate-800 pb-2">
+              <span className="font-extrabold text-sm text-slate-200">قائمة البوابات</span>
               <button onClick={() => setIsSidebarOpen(false)} type="button" className="p-1 hover:bg-slate-800 rounded text-slate-400">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="space-y-1.5">
-              {navStructure.map((entry, idx) => {
-                if (entry.type === 'standalone') {
-                  if (!allowedTabs.includes(entry.id)) return null;
-                  const Icon = entry.icon;
-                  return (
-                    <button
-                      key={entry.id}
-                      onClick={() => {
-                        setActiveTab(entry.id);
-                        setIsSidebarOpen(false);
-                      }}
-                      type="button"
-                      className={`w-full text-right px-4 py-3 rounded-xl font-bold text-xs md:text-sm transition-all flex items-center gap-3 border ${activeTab === entry.id ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'text-slate-405 hover:bg-slate-800 hover:text-slate-200 border-transparent'}`}
-                    >
-                      <Icon className={`w-4 h-4 ${activeTab === entry.id ? 'text-emerald-400' : 'text-slate-500'}`} />
-                      <span>{entry.label}</span>
-                    </button>
-                  );
-                }
-
-                const visibleItems = entry.items.filter(item => allowedTabs.includes(item.id));
-                if (visibleItems.length === 0) return null;
-                const GroupIcon = entry.icon;
+              {visibleTabItems.map(item => {
+                const Icon = item.icon;
                 return (
-                  <div key={entry.label} className={idx > 0 ? 'pt-2' : ''}>
-                    <div className="px-3 pb-1 pt-1 flex items-center gap-1.5 text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">
-                      <GroupIcon className="w-3.5 h-3.5" />
-                      <span>{entry.label}</span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {visibleItems.map(item => {
-                        const Icon = item.icon;
-                        return (
-                          <button
-                            key={item.id}
-                            onClick={() => {
-                              setActiveTab(item.id);
-                              setIsSidebarOpen(false);
-                            }}
-                            type="button"
-                            className={`w-full text-right px-4 py-3 rounded-xl font-bold text-xs md:text-sm transition-all flex items-center gap-3 border ${activeTab === item.id ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'text-slate-405 hover:bg-slate-800 hover:text-slate-200 border-transparent'}`}
-                          >
-                            <Icon className={`w-4 h-4 ${activeTab === item.id ? 'text-emerald-400' : 'text-slate-500'}`} />
-                            <span>{item.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setIsSidebarOpen(false);
+                    }}
+                    type="button"
+                    className={`w-full text-right px-4 py-3 rounded-xl font-bold text-xs md:text-sm transition-all flex items-center gap-3 border ${activeTab === item.id ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'text-slate-405 hover:bg-slate-800 hover:text-slate-200 border-transparent'}`}
+                  >
+                    <Icon className={`w-4 h-4 ${activeTab === item.id ? 'text-emerald-400' : 'text-slate-500'}`} />
+                    <span>{item.label}</span>
+                  </button>
+                )
               })}
             </div>
           </div>

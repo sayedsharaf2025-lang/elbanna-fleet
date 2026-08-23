@@ -197,6 +197,7 @@ interface DbContextType {
 
   // Companies Management
   companies: string[];
+  hiddenCompanies: string[];
   addCompany: (name: string) => void;
   deleteCompany: (name: string) => void;
 
@@ -449,10 +450,26 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const [companies, setCompanies] = useState<string[]>(() => 
     loadSavedArray('elbanna_companies', [])
   );
+  // شركات محذوفة عمداً بواسطة المستخدم — بنستبعدها من قائمة المقترحات حتى لو لسه
+  // موجودة كـ owner_company بسيارات قديمة، عشان "الحذف" يبقى فعلي وميرجعش تاني
+  const [hiddenCompanies, setHiddenCompanies] = useState<string[]>(() =>
+    loadSavedArray('elbanna_hidden_companies', [])
+  );
 
   const addCompany = (companyName: string) => {
     const trimmed = companyName.trim();
     if (!trimmed) return;
+    // لو المستخدم بيضيف شركة كانت متعمولها حذف قبل كده، معنى ده إنه قرر يرجّعها فعلياً
+    if (hiddenCompanies.includes(trimmed)) {
+      const nextHidden = hiddenCompanies.filter(c => c !== trimmed);
+      setHiddenCompanies(nextHidden);
+      localStorage.setItem('elbanna_hidden_companies', JSON.stringify(nextHidden));
+      const supabase = getSupabaseClient();
+      if (supabase && isCloudConnected) {
+        supabase.from('system_settings').upsert({ key: 'hidden_companies', value: JSON.stringify(nextHidden) })
+          .then(({ error }) => { if (error) console.warn("Supabase save hidden_companies error:", error); });
+      }
+    }
     if (companies.includes(trimmed)) return;
     const next = [...companies, trimmed];
     setCompanies(next);
@@ -470,11 +487,21 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const next = companies.filter(c => c !== companyName);
     setCompanies(next);
     localStorage.setItem('elbanna_companies', JSON.stringify(next));
+
+    // نسجلها كمخفية عشان مانستنتجهاش تاني من بيانات owner_company بالسيارات القديمة
+    const nextHidden = hiddenCompanies.includes(companyName) ? hiddenCompanies : [...hiddenCompanies, companyName];
+    setHiddenCompanies(nextHidden);
+    localStorage.setItem('elbanna_hidden_companies', JSON.stringify(nextHidden));
+
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
       supabase.from('system_settings').upsert({ key: 'companies', value: JSON.stringify(next) })
         .then(({ error }) => {
           if (error) console.warn("Supabase save companies error:", error);
+        });
+      supabase.from('system_settings').upsert({ key: 'hidden_companies', value: JSON.stringify(nextHidden) })
+        .then(({ error }) => {
+          if (error) console.warn("Supabase save hidden_companies error:", error);
         });
     }
   };
@@ -534,6 +561,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     localStorage.setItem('elbanna_companies', JSON.stringify(companies));
   }, [companies]);
 
+  useEffect(() => {
+    localStorage.setItem('elbanna_hidden_companies', JSON.stringify(hiddenCompanies));
+  }, [hiddenCompanies]);
+
   // Automatic background silent upload whenever state changes locally (without manual triggers)
   useEffect(() => {
     // Skip the very first run on mount to prevent uploading stale local storage data before downloading fresh cloud data
@@ -567,7 +598,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, 1500);
 
     return () => clearTimeout(delayDebounce);
-  }, [drivers, officials, cars, violations, invoices, invoiceItems, auditLogs, movements, custodyAccounts, custodyMovements, adminPassword, managerPassword, companies]);
+  }, [drivers, officials, cars, violations, invoices, invoiceItems, auditLogs, movements, custodyAccounts, custodyMovements, adminPassword, managerPassword, companies, hiddenCompanies]);
 
   // Network jitter simulation
   useEffect(() => {
@@ -833,6 +864,17 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }
               } catch (e) {
                 console.warn("Parse companies JSON error", e);
+              }
+            }
+            if (row.key === 'hidden_companies' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (Array.isArray(parsed)) {
+                  setHiddenCompanies(parsed);
+                  localStorage.setItem('elbanna_hidden_companies', JSON.stringify(parsed));
+                }
+              } catch (e) {
+                console.warn("Parse hidden_companies JSON error", e);
               }
             }
           });
@@ -1183,7 +1225,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const settingsToUpsert = [
           { key: 'admin_password', value: adminPassword },
           { key: 'manager_password', value: managerPassword },
-          { key: 'companies', value: JSON.stringify(companies) }
+          { key: 'companies', value: JSON.stringify(companies) },
+          { key: 'hidden_companies', value: JSON.stringify(hiddenCompanies) }
         ];
         await supabase.from('system_settings').upsert(settingsToUpsert);
       } catch (settingsUpsertError) {
@@ -3075,6 +3118,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         saveDraftVouchers,
         loadDraftVouchers,
         companies,
+        hiddenCompanies,
         addCompany,
         deleteCompany,
         resetToInitial,
