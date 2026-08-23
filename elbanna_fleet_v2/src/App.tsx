@@ -16,6 +16,8 @@ import { ReportsTab } from './components/ReportsTab';
 import { UsersSettingsTab } from './components/UsersSettingsTab';
 import { SupabaseConsole } from './components/SupabaseConsole';
 import { LoginScreen } from './components/LoginScreen';
+import { TransportRequestsTab } from './components/TransportRequestsTab';
+import { RequestsTrackingTab } from './components/RequestsTrackingTab';
 import {
   LayoutDashboard,
   Truck,
@@ -33,7 +35,9 @@ import {
   FileText,
   Users,
   Settings,
-  Activity
+  Activity,
+  Send,
+  ClipboardList
 } from 'lucide-react';
 
 function DashboardLayout() {
@@ -43,7 +47,7 @@ function DashboardLayout() {
   const allowedTabs = React.useMemo(() => {
     const role = db.currentUser?.role;
     if (role === 'admin') {
-      return ['dashboard', 'fleet', 'violations', 'deductions', 'custody_licensing', 'cross_accounts', 'license_tracking', 'reports', 'users_settings'];
+      return ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings'];
     }
     if (role === 'supervisor') {
       return ['custody_licensing', 'license_tracking', 'reports'];
@@ -51,10 +55,16 @@ function DashboardLayout() {
     if (role === 'manager') {
       return ['reports'];
     }
+    if (role === 'movement_supervisor') {
+      return ['requests_tracking'];
+    }
+    if (role === 'requests_agent') {
+      return ['transport_requests'];
+    }
     return [];
   }, [db.currentUser]);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'fleet' | 'violations' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -77,6 +87,7 @@ function DashboardLayout() {
   // هيكل التنقل: شاشتين مستقلتين (الرئيسية والتقارير) + أربع مجموعات رئيسية تحوي باقي الشاشات
   const navStructure = [
     { type: 'standalone' as const, id: 'dashboard' as const, label: 'لوحة التحكم والتحليلات الحية', icon: LayoutDashboard },
+    { type: 'standalone' as const, id: 'transport_requests' as const, label: 'طلبات النقل', icon: Send },
     {
       type: 'group' as const, label: 'الإعدادات', icon: Settings,
       items: [
@@ -88,6 +99,7 @@ function DashboardLayout() {
       type: 'group' as const, label: 'الحركة', icon: Activity,
       items: [
         { id: 'violations' as const, label: 'تسجيل المخالفات وتفادي التكرار', icon: AlertTriangle },
+        { id: 'requests_tracking' as const, label: 'متابعة الطلبات', icon: ClipboardList },
         { id: 'license_tracking' as const, label: 'متابعة وتحديث التراخيص المتقدمة', icon: CalendarCheck },
         { id: 'custody_licensing' as const, label: 'فواتير تراخيص', icon: Receipt },
       ]
@@ -135,7 +147,7 @@ function DashboardLayout() {
             <div className="flex items-center gap-3 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
               <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
               <span className="text-slate-300 font-extrabold whitespace-nowrap">
-                {db.currentUser?.role === 'admin' ? '👤 مدير النظام' : db.currentUser?.role === 'manager' ? '📈 المدير المالي' : `🧑‍✈️ مشرف: ${db.currentUser?.username}`}
+                {db.currentUser?.role === 'admin' ? '👤 مدير النظام' : db.currentUser?.role === 'manager' ? '📈 المدير المالي' : db.currentUser?.role === 'movement_supervisor' ? '🚚 مشرف الحركة' : db.currentUser?.role === 'requests_agent' ? '📋 مستخدم طلبات النقل' : `🧑‍✈️ مشرف: ${db.currentUser?.username}`}
               </span>
               <button
                 onClick={() => db.logout()}
@@ -314,8 +326,10 @@ function DashboardLayout() {
             )}
 
             {activeTab === 'dashboard' && <DashboardAnalytics />}
+            {activeTab === 'transport_requests' && <TransportRequestsTab />}
             {activeTab === 'fleet' && <CarsDriversTab />}
             {activeTab === 'violations' && <ViolationsTab />}
+            {activeTab === 'requests_tracking' && <RequestsTrackingTab />}
             {activeTab === 'deductions' && <DeductionsTab />}
             {activeTab === 'custody_licensing' && <InvoicesTab />}
             {activeTab === 'cross_accounts' && <AccountsTab />}

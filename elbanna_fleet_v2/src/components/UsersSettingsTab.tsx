@@ -12,7 +12,9 @@ import {
   AlertTriangle, 
   CheckCircle,
   Clock,
-  Info
+  Info,
+  Truck,
+  ClipboardList
 } from 'lucide-react';
 
 export function UsersSettingsTab() {
@@ -48,6 +50,17 @@ export function UsersSettingsTab() {
   const [confirmManagerPass, setConfirmManagerPass] = useState('');
   const [showAdminPass, setShowAdminPass] = useState(false);
   const [showManagerPass, setShowManagerPass] = useState(false);
+
+  // Change Movement Supervisor / Requests Agent password state
+  const [currentMovementPass, setCurrentMovementPass] = useState('');
+  const [newMovementPass, setNewMovementPass] = useState('');
+  const [confirmMovementPass, setConfirmMovementPass] = useState('');
+  const [showMovementPass, setShowMovementPass] = useState(false);
+
+  const [currentRequestsPass, setCurrentRequestsPass] = useState('');
+  const [newRequestsPass, setNewRequestsPass] = useState('');
+  const [confirmRequestsPass, setConfirmRequestsPass] = useState('');
+  const [showRequestsPass, setShowRequestsPass] = useState(false);
 
   const showNotification = (type: 'success' | 'error', text: string) => {
     if (type === 'success') {
@@ -183,6 +196,64 @@ export function UsersSettingsTab() {
     setCurrentManagerPass('');
     setNewManagerPass('');
     setConfirmManagerPass('');
+  };
+
+  // Change Movement Supervisor password submit action
+  const handleChangeMovementPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    const storedPass = db.movementSupervisorPassword || localStorage.getItem('elbanna_movement_supervisor_password') || 'movement123';
+
+    if (currentMovementPass !== storedPass) {
+      showNotification('error', 'كلمة مرور مشرف الحركة الحالية غير صحيحة!');
+      return;
+    }
+    if (newMovementPass.length < 4) {
+      showNotification('error', 'يجب أن تبلغ كلمة المرور الجديدة لمشرف الحركة 4 رموز على الأقل');
+      return;
+    }
+    if (newMovementPass !== confirmMovementPass) {
+      showNotification('error', 'يرجى تأكيد كلمة المرور بشكل متطابق؛ لم تتطابق مدخلات مشرف الحركة.');
+      return;
+    }
+
+    if (db.updateMovementSupervisorPassword) {
+      db.updateMovementSupervisorPassword(newMovementPass);
+    } else {
+      localStorage.setItem('elbanna_movement_supervisor_password', newMovementPass);
+    }
+    showNotification('success', 'تم تغيير كلمة مرور مشرف الحركة بنجاح!');
+    setCurrentMovementPass('');
+    setNewMovementPass('');
+    setConfirmMovementPass('');
+  };
+
+  // Change Requests Agent password submit action
+  const handleChangeRequestsPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    const storedPass = db.requestsAgentPassword || localStorage.getItem('elbanna_requests_agent_password') || 'requests123';
+
+    if (currentRequestsPass !== storedPass) {
+      showNotification('error', 'كلمة مرور مستخدم طلبات النقل الحالية غير صحيحة!');
+      return;
+    }
+    if (newRequestsPass.length < 4) {
+      showNotification('error', 'يجب أن تبلغ كلمة المرور الجديدة لمستخدم طلبات النقل 4 رموز على الأقل');
+      return;
+    }
+    if (newRequestsPass !== confirmRequestsPass) {
+      showNotification('error', 'يرجى تأكيد كلمة المرور بشكل متطابق؛ لم تتطابق مدخلات طلبات النقل.');
+      return;
+    }
+
+    if (db.updateRequestsAgentPassword) {
+      db.updateRequestsAgentPassword(newRequestsPass);
+    } else {
+      localStorage.setItem('elbanna_requests_agent_password', newRequestsPass);
+    }
+    showNotification('success', 'تم تغيير كلمة مرور مستخدم طلبات النقل بنجاح!');
+    setCurrentRequestsPass('');
+    setNewRequestsPass('');
+    setConfirmRequestsPass('');
   };
 
   // Toggle Visibility of selected password in grid list
@@ -622,6 +693,180 @@ export function UsersSettingsTab() {
               </button>
             </form>
           </div>
+
+          {/* Panel Form 3: Movement Supervisor password */}
+          <div className="bg-slate-900 border border-slate-850 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-3 text-indigo-400">
+              <Truck className="w-5 h-5 text-indigo-500" />
+              <div>
+                <h3 className="text-sm font-black text-slate-100">تغيير كلمة مرور مشرف الحركة</h3>
+                <p className="text-[10px] text-slate-500 mt-0.5">الحساب المخصص لمشرف الحركة للرد على طلبات النقل وربطها بسيارة وسائق.</p>
+              </div>
+            </div>
+
+            {/* عرض كلمة المرور الحالية لمشرف الحركة */}
+            <div className="p-3 bg-slate-950/60 border border-slate-850 rounded-xl space-y-1">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-400 font-bold">كلمة المرور الحالية لمشرف الحركة:</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold text-indigo-400 bg-slate-950 border border-slate-805 px-2.5 py-1 rounded">
+                    {showMovementPass ? (db.movementSupervisorPassword || localStorage.getItem('elbanna_movement_supervisor_password') || 'movement123') : '••••••••'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowMovementPass(!showMovementPass)}
+                    className="text-slate-500 hover:text-slate-300 p-1 bg-slate-900 border border-slate-800 rounded transition-all"
+                    title={showMovementPass ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                  >
+                    {showMovementPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleChangeMovementPassword} className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="block text-slate-405 font-bold">اسم المستخدم لمشرف الحركة (افتراضي وثابت)</label>
+                <input
+                  type="text"
+                  disabled
+                  value="movement_supervisor"
+                  className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-2 text-slate-500 font-mono font-bold cursor-not-allowed"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-slate-400 font-bold">أدخل كلمة مرور مشرف الحركة الحالية</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={currentMovementPass}
+                  onChange={(e) => setCurrentMovementPass(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg px-2.5 py-2 text-slate-200 outline-none font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold">كلمة المرور الجديدة</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="حد أدنى 4 رموز"
+                    value={newMovementPass}
+                    onChange={(e) => setNewMovementPass(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg px-2.5 py-2 text-slate-200 outline-none font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold">تأكيد كلمة المرور الجديدة</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="كرر نفس الكلمة"
+                    value={confirmMovementPass}
+                    onChange={(e) => setConfirmMovementPass(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg px-2.5 py-2 text-slate-200 outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-indigo-500 hover:bg-indigo-400 text-slate-950 font-black py-2.5 rounded-xl transition-all shadow-lg shadow-indigo-500/5 cursor-pointer"
+              >
+                تحديث أمان مشرف الحركة
+              </button>
+            </form>
+          </div>
+
+          {/* Panel Form 4: Requests Agent password */}
+          <div className="bg-slate-900 border border-slate-850 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center gap-3 border-b border-slate-800 pb-3 text-amber-400">
+              <ClipboardList className="w-5 h-5 text-amber-500" />
+              <div>
+                <h3 className="text-sm font-black text-slate-100">تغيير كلمة مرور مستخدم طلبات النقل</h3>
+                <p className="text-[10px] text-slate-500 mt-0.5">الحساب المخصص لتسجيل طلبات النقل الجديدة من المزارع ومتابعة حالتها.</p>
+              </div>
+            </div>
+
+            {/* عرض كلمة المرور الحالية لمستخدم طلبات النقل */}
+            <div className="p-3 bg-slate-950/60 border border-slate-850 rounded-xl space-y-1">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-400 font-bold">كلمة المرور الحالية لمستخدم طلبات النقل:</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold text-amber-400 bg-slate-950 border border-slate-805 px-2.5 py-1 rounded">
+                    {showRequestsPass ? (db.requestsAgentPassword || localStorage.getItem('elbanna_requests_agent_password') || 'requests123') : '••••••••'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowRequestsPass(!showRequestsPass)}
+                    className="text-slate-500 hover:text-slate-300 p-1 bg-slate-900 border border-slate-800 rounded transition-all"
+                    title={showRequestsPass ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                  >
+                    {showRequestsPass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleChangeRequestsPassword} className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="block text-slate-405 font-bold">اسم المستخدم لطلبات النقل (افتراضي وثابت)</label>
+                <input
+                  type="text"
+                  disabled
+                  value="requests_agent"
+                  className="w-full bg-slate-950 border border-slate-850 rounded-lg px-2.5 py-2 text-slate-500 font-mono font-bold cursor-not-allowed"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-slate-400 font-bold">أدخل كلمة المرور الحالية لطلبات النقل</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={currentRequestsPass}
+                  onChange={(e) => setCurrentRequestsPass(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-lg px-2.5 py-2 text-slate-200 outline-none font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold">كلمة المرور الجديدة</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="حد أدنى 4 رموز"
+                    value={newRequestsPass}
+                    onChange={(e) => setNewRequestsPass(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-lg px-2.5 py-2 text-slate-200 outline-none font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-slate-400 font-bold">تأكيد كلمة المرور الجديدة</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="كرر نفس الكلمة"
+                    value={confirmRequestsPass}
+                    onChange={(e) => setConfirmRequestsPass(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-lg px-2.5 py-2 text-slate-200 outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-2.5 rounded-xl transition-all shadow-lg shadow-amber-500/5 cursor-pointer"
+              >
+                تحديث أمان مستخدم طلبات النقل
+              </button>
+            </form>
+          </div>
         </div>
       )}
 
@@ -645,14 +890,16 @@ export function UsersSettingsTab() {
                 <span className="font-extrabold text-xs text-rose-400 bg-rose-550/10 px-2 py-0.5 rounded-md border border-rose-500/10">صلاحية مطلقة</span>
                 <h4 className="font-black text-slate-100 text-sm">👤 أدمن النظام الرئيسي (Admin)</h4>
               </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed text-right">المالك الفني والمحاسبي الكامل للنظام. يتم فك الحظر ومظلة الحماية له عبر كافة الـ 8 بوابات لتأسيس وحوكمة الشركات.</p>
+              <p className="text-[11px] text-slate-400 leading-relaxed text-right">المالك الفني والمحاسبي الكامل للنظام. يتم فك الحظر ومظلة الحماية له عبر كافة البوابات لتأسيس وحوكمة الشركات.</p>
               
               <div className="border-t border-slate-850/50 pt-2.5 space-y-1.5 text-[10px]">
-                <p className="font-bold text-slate-300">الشاشات المتاحة للرتبة (8 شاشات):</p>
+                <p className="font-bold text-slate-300">الشاشات المتاحة للرتبة (10 شاشات):</p>
                 <div className="flex flex-wrap gap-1">
                   <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">لوحة التحليلات</span>
+                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">طلبات النقل</span>
                   <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">السيارات والسائقين</span>
                   <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">تسجيل المخالفات</span>
+                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">متابعة الطلبات</span>
                   <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">الخصومات المجمعة</span>
                   <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">تسوية وتحصيل فواتير</span>
                   <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">المقاصة المالية</span>
@@ -694,6 +941,40 @@ export function UsersSettingsTab() {
                   <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded">تسوية وتحصيل فواتير العهد</span>
                   <span className="bg-slate-900 text-slate-405 border border-slate-800 px-1.5 py-0.5 rounded">تراخيص أسطول السيارات</span>
                   <span className="bg-slate-900 text-slate-405 border border-slate-800 px-1.5 py-0.5 rounded">شاشة التقارير الموحدة للطباعة</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Box Role 4: Movement Supervisor */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/10 space-y-3 relative overflow-hidden">
+              <div className="absolute right-0 top-0 w-12 h-12 bg-indigo-500/5 rounded-full blur"></div>
+              <div className="flex justify-between items-center">
+                <span className="font-extrabold text-xs text-indigo-400 bg-indigo-550/10 px-2 py-0.5 rounded-md border border-indigo-500/10">حركة ونقل</span>
+                <h4 className="font-black text-slate-100 text-sm">🚚 مشرف الحركة (Movement Supervisor)</h4>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed text-right">مخول بمراجعة طلبات النقل الواردة من المزارع والرد عليها بسيارة مناسبة، مع ربط السائق تلقائيًا، ومتابعة الطلبات الجارية حتى التسليم.</p>
+              
+              <div className="border-t border-slate-850/50 pt-2.5 space-y-1.5 text-[10px]">
+                <p className="font-bold text-slate-300">الشاشات المتاحة للرتبة (شاشة واحدة):</p>
+                <div className="flex flex-wrap gap-1">
+                  <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded">متابعة الطلبات</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Box Role 5: Requests Agent */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-amber-500/10 space-y-3 relative overflow-hidden">
+              <div className="absolute right-0 top-0 w-12 h-12 bg-amber-500/5 rounded-full blur"></div>
+              <div className="flex justify-between items-center">
+                <span className="font-extrabold text-xs text-amber-400 bg-amber-550/10 px-2 py-0.5 rounded-md border border-amber-500/10">تسجيل طلبات</span>
+                <h4 className="font-black text-slate-100 text-sm">📋 مستخدم طلبات النقل (Requests Agent)</h4>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed text-right">مخول بتسجيل طلبات نقل جديدة من المزارع (اسم الطالب، المزرعة، نوع السيارة، وصف الحمولة)، ومتابعة حالة الطلبات السابقة.</p>
+              
+              <div className="border-t border-slate-850/50 pt-2.5 space-y-1.5 text-[10px]">
+                <p className="font-bold text-slate-300">الشاشات المتاحة للرتبة (شاشة واحدة):</p>
+                <div className="flex flex-wrap gap-1">
+                  <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded">طلبات النقل</span>
                 </div>
               </div>
             </div>

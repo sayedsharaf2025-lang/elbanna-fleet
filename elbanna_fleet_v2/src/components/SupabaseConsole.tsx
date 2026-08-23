@@ -259,7 +259,24 @@ CREATE TABLE IF NOT EXISTS system_settings (
   value TEXT NOT NULL
 );
 
--- 12. تعطيل حماية الصفوف (DISABLE RLS) للمزامنة المفتوحة السلسة عبر جميع الأجهزة والهواتف
+-- 12. Transport Requests Table (طلبات النقل)
+CREATE TABLE IF NOT EXISTS transport_requests (
+  id TEXT PRIMARY KEY,
+  request_number VARCHAR(20) UNIQUE NOT NULL,
+  requester_name VARCHAR(150) NOT NULL,
+  farm_name VARCHAR(150) NOT NULL,
+  car_type VARCHAR(100) NOT NULL,
+  cargo_description TEXT,
+  request_date DATE NOT NULL,
+  status VARCHAR(20) CHECK (status IN ('new', 'in_progress', 'done')) DEFAULT 'new',
+  assigned_car_id TEXT REFERENCES cars(id) ON DELETE SET NULL,
+  assigned_driver_id TEXT REFERENCES drivers(id) ON DELETE SET NULL,
+  responded_at TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  created_by VARCHAR(100)
+);
+
+-- 13. تعطيل حماية الصفوف (DISABLE RLS) للمزامنة المفتوحة السلسة عبر جميع الأجهزة والهواتف
 ALTER TABLE officials DISABLE ROW LEVEL SECURITY;
 ALTER TABLE drivers DISABLE ROW LEVEL SECURITY;
 ALTER TABLE cars DISABLE ROW LEVEL SECURITY;
@@ -271,8 +288,9 @@ ALTER TABLE driver_account_movements DISABLE ROW LEVEL SECURITY;
 ALTER TABLE custody_accounts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE custody_movements DISABLE ROW LEVEL SECURITY;
 ALTER TABLE system_settings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE transport_requests DISABLE ROW LEVEL SECURITY;
 
--- 13. تدارك إضافة الأعمدة القديمة تلقائيًا (Migration Scripts)
+-- 14. تدارك إضافة الأعمدة القديمة تلقائيًا (Migration Scripts)
 ALTER TABLE officials ADD COLUMN IF NOT EXISTS password VARCHAR(100) DEFAULT '123';
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);`;
 

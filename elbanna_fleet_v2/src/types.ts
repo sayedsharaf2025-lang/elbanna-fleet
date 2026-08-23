@@ -5,7 +5,7 @@
 
 export interface User {
   username: string;
-  role: 'admin' | 'manager' | 'supervisor';
+  role: 'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent';
   officialId?: string; // ID of official if role is supervisor
   name: string;
 }
@@ -109,6 +109,22 @@ export interface InvoiceAuditLog {
   operation_type: 'create' | 'edit' | 'delete'; // نوع العملية
   old_value: string; // القيمة القديمة بصيغة نصية
   new_value: string; // القيمة الجديدة بصيغة نصية
+}
+
+export interface TransportRequest {
+  id: string; // UUID
+  request_number: string; // رقم الطلب بصيغة سنة+شهر وأرقام تسلسلية من 4 خانات، مثال: 2608-0001
+  requester_name: string; // اسم الطالب
+  farm_name: string; // مكان الطلب (اسم المزرعة)
+  car_type: string; // نوع السيارة المطلوبة (جامبو / دبابة / ملاكي)
+  cargo_description: string; // وصف الحمولة
+  request_date: string; // تاريخ الطلب
+  status: 'new' | 'in_progress' | 'done'; // جديد (بدون سيارة) / جاري (تم الرد بسيارة) / منتهى (تم التوصيل)
+  assigned_car_id?: string; // السيارة التي تم الرد بها على الطلب
+  assigned_driver_id?: string; // السائق المرتبط بالسيارة، يُضاف تلقائيًا
+  responded_at?: string; // وقت الرد بالسيارة
+  delivered_at?: string; // وقت انتهاء التوصيل
+  created_by?: string; // اسم المستخدم الذي سجل الطلب
 }
 
 export interface DriverAccountMovement {

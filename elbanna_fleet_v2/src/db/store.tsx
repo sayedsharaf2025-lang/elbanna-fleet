@@ -15,7 +15,8 @@ import {
   DriverAccountMovement, 
   CustodyAccount, 
   CustodyMovement,
-  User
+  User,
+  TransportRequest
 } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import {
@@ -108,7 +109,22 @@ interface DbContextType {
   movements: DriverAccountMovement[];
   custodyAccounts: CustodyAccount[];
   custodyMovements: CustodyMovement[];
-  
+
+  // Transport Requests (طلبات النقل)
+  transportRequests: TransportRequest[];
+  farms: string[];
+  addTransportRequest: (data: {
+    requester_name: string;
+    farm_name: string;
+    car_type: string;
+    cargo_description: string;
+    request_date: string;
+  }) => TransportRequest;
+  updateTransportRequest: (id: string, updatedFields: Partial<TransportRequest>) => void;
+  deleteTransportRequest: (id: string) => void;
+  respondTransportRequestWithCar: (requestId: string, carId: string) => { success: boolean; error?: string };
+  markTransportRequestDelivered: (requestId: string) => void;
+
   // Real-time status simulation / State settings
   isRealtimeActive: boolean;
   setRealtimeActive: (val: boolean) => void;
@@ -208,12 +224,16 @@ interface DbContextType {
 
   // Authentication states
   currentUser: User | null;
-  login: (username: string, role: 'admin' | 'manager' | 'supervisor', password?: string, officialId?: string) => Promise<{ success: boolean; error?: string }>;
+  login: (username: string, role: 'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent', password?: string, officialId?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   adminPassword?: string;
   managerPassword?: string;
+  movementSupervisorPassword?: string;
+  requestsAgentPassword?: string;
   updateAdminPassword?: (newPass: string) => void;
   updateManagerPassword?: (newPass: string) => void;
+  updateMovementSupervisorPassword?: (newPass: string) => void;
+  updateRequestsAgentPassword?: (newPass: string) => void;
 }
 
 const DbContext = createContext<DbContextType | undefined>(undefined);
@@ -319,6 +339,38 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
+  const [movementSupervisorPassword, _setMovementSupervisorPassword] = useState<string>(() =>
+    localStorage.getItem('elbanna_movement_supervisor_password') || 'movement123'
+  );
+
+  const [requestsAgentPassword, _setRequestsAgentPassword] = useState<string>(() =>
+    localStorage.getItem('elbanna_requests_agent_password') || 'requests123'
+  );
+
+  const updateMovementSupervisorPassword = (newPass: string) => {
+    _setMovementSupervisorPassword(newPass);
+    localStorage.setItem('elbanna_movement_supervisor_password', newPass);
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'movement_supervisor_password', value: newPass })
+        .then(({ error }) => {
+          if (error) console.warn("Supabase save movement_supervisor_password error:", error);
+        });
+    }
+  };
+
+  const updateRequestsAgentPassword = (newPass: string) => {
+    _setRequestsAgentPassword(newPass);
+    localStorage.setItem('elbanna_requests_agent_password', newPass);
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'requests_agent_password', value: newPass })
+        .then(({ error }) => {
+          if (error) console.warn("Supabase save requests_agent_password error:", error);
+        });
+    }
+  };
+
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('elbanna_current_user');
@@ -330,7 +382,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   const login = async (
     username: string, 
-    role: 'admin' | 'manager' | 'supervisor', 
+    role: 'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent', 
     password?: string, 
     officialId?: string
   ): Promise<{ success: boolean; error?: string }> => {
@@ -421,6 +473,48 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return { success: false, error: 'كلمة المرور لمشرف الصرف غير صحيحة' };
       }
       return { success: false, error: 'مشرف الصرف غير موجود بقاعدة البيانات' };
+    } else if (role === 'movement_supervisor') {
+      let savedPass = movementSupervisorPassword;
+      if (supabase) {
+        try {
+          const { data, error } = await supabase.from('system_settings').select('value').eq('key', 'movement_supervisor_password').maybeSingle();
+          if (!error && data && data.value) {
+            savedPass = data.value;
+            _setMovementSupervisorPassword(data.value);
+            localStorage.setItem('elbanna_movement_supervisor_password', data.value);
+          }
+        } catch (e) {
+          console.warn("Direct login check error:", e);
+        }
+      }
+      if (username.trim().toLowerCase() === 'movement_supervisor' && password === savedPass) {
+        const uObj: User = { username: 'movement_supervisor', role: 'movement_supervisor', name: 'مشرف الحركة' };
+        setCurrentUser(uObj);
+        localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
+        return { success: true };
+      }
+      return { success: false, error: 'اسم المستخدم أو كلمة المرور لمشرف الحركة غير صحيحة' };
+    } else if (role === 'requests_agent') {
+      let savedPass = requestsAgentPassword;
+      if (supabase) {
+        try {
+          const { data, error } = await supabase.from('system_settings').select('value').eq('key', 'requests_agent_password').maybeSingle();
+          if (!error && data && data.value) {
+            savedPass = data.value;
+            _setRequestsAgentPassword(data.value);
+            localStorage.setItem('elbanna_requests_agent_password', data.value);
+          }
+        } catch (e) {
+          console.warn("Direct login check error:", e);
+        }
+      }
+      if (username.trim().toLowerCase() === 'requests_agent' && password === savedPass) {
+        const uObj: User = { username: 'requests_agent', role: 'requests_agent', name: 'مستخدم طلبات النقل' };
+        setCurrentUser(uObj);
+        localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
+        return { success: true };
+      }
+      return { success: false, error: 'اسم المستخدم أو كلمة المرور لمستخدم طلبات النقل غير صحيحة' };
     }
     return { success: false, error: 'نوع الحساب غير معروف' };
   };
@@ -506,6 +600,30 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
+  const [transportRequests, setTransportRequests] = useState<TransportRequest[]>(() =>
+    loadSavedArray('elbanna_transport_requests', [])
+  );
+
+  const [farms, setFarms] = useState<string[]>(() =>
+    loadSavedArray('elbanna_farms', [])
+  );
+
+  const addFarmIfNew = (farmName: string) => {
+    const trimmed = farmName.trim();
+    if (!trimmed) return;
+    setFarms(prev => {
+      if (prev.includes(trimmed)) return prev;
+      const next = [...prev, trimmed];
+      localStorage.setItem('elbanna_farms', JSON.stringify(next));
+      const supabase = getSupabaseClient();
+      if (supabase && isCloudConnected) {
+        supabase.from('system_settings').upsert({ key: 'farms', value: JSON.stringify(next) })
+          .then(({ error }) => { if (error) console.warn("Supabase save farms error:", error); });
+      }
+      return next;
+    });
+  };
+
   const [isRealtimeActive, setRealtimeActive] = useState(true);
   const [latencyMs, setLatencyMs] = useState(50);
 
@@ -564,6 +682,14 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   useEffect(() => {
     localStorage.setItem('elbanna_hidden_companies', JSON.stringify(hiddenCompanies));
   }, [hiddenCompanies]);
+
+  useEffect(() => {
+    localStorage.setItem('elbanna_transport_requests', JSON.stringify(transportRequests));
+  }, [transportRequests]);
+
+  useEffect(() => {
+    localStorage.setItem('elbanna_farms', JSON.stringify(farms));
+  }, [farms]);
 
   // Automatic background silent upload whenever state changes locally (without manual triggers)
   useEffect(() => {
@@ -633,7 +759,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         resLogs,
         resMovements,
         resCustodyAccs,
-        resCustodyMovs
+        resCustodyMovs,
+        resTransportRequests
       ] = await Promise.all([
         supabase.from('drivers').select('*'),
         supabase.from('officials').select('*'),
@@ -644,7 +771,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         supabase.from('invoice_audit_logs').select('*').order('timestamp', { ascending: false }),
         supabase.from('driver_account_movements').select('*').order('date', { ascending: false }),
         supabase.from('custody_accounts').select('*'),
-        supabase.from('custody_movements').select('*').order('date', { ascending: false })
+        supabase.from('custody_movements').select('*').order('date', { ascending: false }),
+        supabase.from('transport_requests').select('*').order('request_number', { ascending: false })
       ]);
 
       let errorOccurred = false;
@@ -690,6 +818,11 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         errorOccurred = true;
         detailedErrors.push(`custody_movements: ${resCustodyMovs.error.message} (code: ${resCustodyMovs.error.code})`);
       }
+      // جدول طلبات النقل قد لا يكون منشأ بعد على مشاريع قديمة، فلا نمنع باقي المزامنة بسببه
+      if (resTransportRequests.error && !resTransportRequests.error.message?.includes("does not exist") && !resTransportRequests.error.message?.includes("schema cache")) {
+        errorOccurred = true;
+        detailedErrors.push(`transport_requests: ${resTransportRequests.error.message} (code: ${resTransportRequests.error.code})`);
+      }
 
       if (errorOccurred) {
         console.warn("Supabase download tables errors:", detailedErrors);
@@ -718,6 +851,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           if (resMovements.error?.message?.includes("does not exist")) missingTables.push("driver_account_movements");
           if (resCustodyAccs.error?.message?.includes("does not exist")) missingTables.push("custody_accounts");
           if (resCustodyMovs.error?.message?.includes("does not exist")) missingTables.push("custody_movements");
+          if (resTransportRequests.error?.message?.includes("does not exist")) missingTables.push("transport_requests");
 
           setIsCloudConnected(true);
           const msg = `جداول قاعدة البيانات التالية غير منشأة بالخادم السحابي بعد: [ ${missingTables.join(", ")} ]. يرجى فتح نافذة الـ SQL Editor لتهيئتها لتجربة المزامنة الكاملة وحفظ البيانات فوريًا.`;
@@ -841,6 +975,12 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const localOnly = custodyMovements.filter(m => !cloudIds.has(m.id));
         setCustodyMovements([...cloudMovs, ...localOnly]);
       }
+      if (resTransportRequests.data) {
+        const cloudRequests = resTransportRequests.data;
+        const cloudIds = new Set(cloudRequests.map((r: any) => r.id));
+        const localOnly = transportRequests.filter(r => !cloudIds.has(r.id));
+        setTransportRequests([...cloudRequests, ...localOnly]);
+      }
 
       // Safe separate fetch for system settings / admin & manager passwords so it doesn't block the core tables
       try {
@@ -877,6 +1017,25 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 console.warn("Parse hidden_companies JSON error", e);
               }
             }
+            if (row.key === 'farms' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (Array.isArray(parsed)) {
+                  setFarms(parsed);
+                  localStorage.setItem('elbanna_farms', JSON.stringify(parsed));
+                }
+              } catch (e) {
+                console.warn("Parse farms JSON error", e);
+              }
+            }
+            if (row.key === 'movement_supervisor_password' && row.value) {
+              _setMovementSupervisorPassword(row.value);
+              localStorage.setItem('elbanna_movement_supervisor_password', row.value);
+            }
+            if (row.key === 'requests_agent_password' && row.value) {
+              _setRequestsAgentPassword(row.value);
+              localStorage.setItem('elbanna_requests_agent_password', row.value);
+            }
           });
         }
       } catch (settingsError) {
@@ -895,6 +1054,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         `• بنود الفواتير التفصيلية: ${resItems.data?.length || 0} بند مصروف`,
         `• حركات كشوف حساب السائقين: ${resMovements.data?.length || 0} حركة حساب`,
         `• حركات العهد النقدية للمشرفين: ${resCustodyMovs.data?.length || 0} حركة عهدة`,
+        `• طلبات النقل: ${resTransportRequests.data?.length || 0} طلب`,
         `• إعدادات وكلمات مرور المشرفين والأدمن: تم المزامنة والتحديث بنجاح ✔`
       ].join("\n");
 
@@ -1168,6 +1328,11 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         date: sanitizeDateStr(m.date, "2026-06-07")
       }));
 
+      const sanitizedTransportRequests = transportRequests.map(r => ({
+        ...r,
+        request_date: sanitizeDateStr(r.request_date, "2026-06-07")
+      }));
+
       const uploadTasks = [
         sanitizedDrivers.length > 0 ? supabase.from('drivers').upsert(sanitizedDrivers) : Promise.resolve({ error: null }),
         officials.length > 0 ? supabase.from('officials').upsert(officials) : Promise.resolve({ error: null }),
@@ -1183,6 +1348,18 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
       const results = await Promise.all(uploadTasks);
       const errors = results.filter(r => r && r.error).map(r => r.error);
+
+      // رفع طلبات النقل بشكل منفصل ومتسامح: لو الجدول غير منشأ بعد على مشروع قديم، منمنعش باقي المزامنة
+      if (sanitizedTransportRequests.length > 0) {
+        try {
+          const { error } = await supabase.from('transport_requests').upsert(sanitizedTransportRequests);
+          if (error && !error.message?.includes("does not exist") && !error.message?.includes("schema cache")) {
+            console.warn("Supabase upload transport_requests error:", error);
+          }
+        } catch (e) {
+          console.warn("Supabase upload transport_requests exception:", e);
+        }
+      }
 
       if (errors.length > 0) {
         console.error("Supabase upload error:", errors);
@@ -1225,8 +1402,11 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const settingsToUpsert = [
           { key: 'admin_password', value: adminPassword },
           { key: 'manager_password', value: managerPassword },
+          { key: 'movement_supervisor_password', value: movementSupervisorPassword },
+          { key: 'requests_agent_password', value: requestsAgentPassword },
           { key: 'companies', value: JSON.stringify(companies) },
-          { key: 'hidden_companies', value: JSON.stringify(hiddenCompanies) }
+          { key: 'hidden_companies', value: JSON.stringify(hiddenCompanies) },
+          { key: 'farms', value: JSON.stringify(farms) }
         ];
         await supabase.from('system_settings').upsert(settingsToUpsert);
       } catch (settingsUpsertError) {
@@ -1305,6 +1485,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       { id: "ca_3_2", official_id: "3", name: "فيزا البنك الأهلي تراخيص", type: 'visa', balance: 20000 }
     ]);
     setCustodyMovements([]);
+    setTransportRequests([]);
+    setFarms([]);
+    localStorage.removeItem('elbanna_transport_requests');
+    localStorage.removeItem('elbanna_farms');
     localStorage.removeItem('elbanna_drivers');
     localStorage.removeItem('elbanna_officials');
     localStorage.removeItem('elbanna_cars');
@@ -1329,7 +1513,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         supabase.from('invoice_audit_logs').delete().neq('id', 'WIPE_ALL'),
         supabase.from('driver_account_movements').delete().neq('id', 'WIPE_ALL'),
         supabase.from('custody_accounts').delete().neq('id', 'WIPE_ALL'),
-        supabase.from('custody_movements').delete().neq('id', 'WIPE_ALL')
+        supabase.from('custody_movements').delete().neq('id', 'WIPE_ALL'),
+        supabase.from('transport_requests').delete().neq('id', 'WIPE_ALL')
       ]).catch(e => console.error("Wiped supabase on reset table error:", e));
     }
   };
@@ -1340,6 +1525,99 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return self.crypto.randomUUID();
     }
     return prefix + "_" + Math.floor(Math.random() * 100000) + "_" + Date.now();
+  };
+
+  // Transport Requests action definitions (طلبات النقل)
+  const generateRequestNumber = (): string => {
+    const now = new Date();
+    const yy = String(now.getFullYear()).slice(-2);
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const prefix = `${yy}${mm}`;
+    const sameMonthRequests = transportRequests.filter(r => (r.request_number || '').startsWith(prefix + '-'));
+    let maxSeq = 0;
+    sameMonthRequests.forEach(r => {
+      const parts = (r.request_number || '').split('-');
+      const seq = parseInt(parts[1] || '0', 10);
+      if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+    });
+    const nextSeq = String(maxSeq + 1).padStart(4, '0');
+    return `${prefix}-${nextSeq}`;
+  };
+
+  const addTransportRequest = (data: {
+    requester_name: string;
+    farm_name: string;
+    car_type: string;
+    cargo_description: string;
+    request_date: string;
+  }): TransportRequest => {
+    const newId = generateId("tr");
+    const newRequest: TransportRequest = {
+      id: newId,
+      request_number: generateRequestNumber(),
+      requester_name: data.requester_name.trim(),
+      farm_name: data.farm_name.trim(),
+      car_type: data.car_type.trim(),
+      cargo_description: data.cargo_description.trim(),
+      request_date: normalizeDateToYmd(data.request_date),
+      status: 'new',
+      created_by: currentUser?.name || currentUser?.username
+    };
+    setTransportRequests(prev => [...prev, newRequest]);
+    addFarmIfNew(newRequest.farm_name);
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('transport_requests').insert([newRequest]).then(({ error }) => {
+        if (error) console.error("Supabase insert transport_request error:", error);
+      });
+    }
+    return newRequest;
+  };
+
+  const updateTransportRequest = (id: string, updatedFields: Partial<TransportRequest>) => {
+    setTransportRequests(prev => prev.map(r => r.id === id ? { ...r, ...updatedFields } : r));
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('transport_requests').update(updatedFields).eq('id', id).then(({ error }) => {
+        if (error) console.error("Supabase update transport_request error:", error);
+      });
+    }
+  };
+
+  const deleteTransportRequest = (id: string) => {
+    setTransportRequests(prev => prev.filter(r => r.id !== id));
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('transport_requests').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error("Supabase delete transport_request error:", error);
+      });
+    }
+  };
+
+  // الرد على طلب نقل بسيارة: الحالة تتحول لـ "جاري" ويتم ربط السائق تلقائيًا بالسيارة المختارة
+  const respondTransportRequestWithCar = (requestId: string, carId: string): { success: boolean; error?: string } => {
+    const request = transportRequests.find(r => r.id === requestId);
+    if (!request) return { success: false, error: 'الطلب غير موجود' };
+    const car = cars.find(c => c.id === carId);
+    if (!car) return { success: false, error: 'السيارة غير موجودة' };
+
+    const updatedFields: Partial<TransportRequest> = {
+      status: 'in_progress',
+      assigned_car_id: car.id,
+      assigned_driver_id: car.driver_id || undefined,
+      responded_at: new Date().toISOString()
+    };
+
+    updateTransportRequest(requestId, updatedFields);
+    return { success: true };
+  };
+
+  // إنهاء التوصيل: الحالة تتحول لـ "منتهى"
+  const markTransportRequestDelivered = (requestId: string) => {
+    updateTransportRequest(requestId, { status: 'done', delivered_at: new Date().toISOString() });
   };
 
   // Drivers action definitions
@@ -2945,7 +3223,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         resLogs,
         resMovements,
         resCustodyAccs,
-        resCustodyMovs
+        resCustodyMovs,
+        resTransportRequests
       ] = await Promise.all([
         supabase.from('drivers').select('*'),
         supabase.from('officials').select('*'),
@@ -2956,7 +3235,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         supabase.from('invoice_audit_logs').select('*').order('timestamp', { ascending: false }),
         supabase.from('driver_account_movements').select('*').order('date', { ascending: false }),
         supabase.from('custody_accounts').select('*'),
-        supabase.from('custody_movements').select('*').order('date', { ascending: false })
+        supabase.from('custody_movements').select('*').order('date', { ascending: false }),
+        supabase.from('transport_requests').select('*')
       ]);
 
       const errors = [
@@ -2984,7 +3264,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           auditLogs: resLogs.data || [],
           movements: resMovements.data || [],
           custodyAccounts: resCustodyAccs.data || [],
-          custodyMovements: resCustodyMovs.data || []
+          custodyMovements: resCustodyMovs.data || [],
+          transportRequests: resTransportRequests.data || []
         }
       };
 
@@ -3075,6 +3356,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         movements: movements || [],
         custodyAccounts: custodyAccounts || [],
         custodyMovements: custodyMovements || [],
+        transportRequests: transportRequests || [],
+        farms: farms || [],
+        addTransportRequest,
+        updateTransportRequest,
+        deleteTransportRequest,
+        respondTransportRequestWithCar,
+        markTransportRequestDelivered,
         isRealtimeActive,
         setRealtimeActive,
         latencyMs,
@@ -3130,8 +3418,12 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         logout,
         adminPassword,
         managerPassword,
+        movementSupervisorPassword,
+        requestsAgentPassword,
         updateAdminPassword,
-        updateManagerPassword
+        updateManagerPassword,
+        updateMovementSupervisorPassword,
+        updateRequestsAgentPassword
       }}
     >
       {children}
