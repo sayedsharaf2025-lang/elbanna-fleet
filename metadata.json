@@ -1,6 +1,0 @@
-{
-  "name": "Fleet Management Group",
-  "description": "نظام رقمي فاخر بمستوى مؤسسي لإعادة تسيير الأساطيل، الصيانة المتكاملة، طلبات النقل، المخالفات والخصومات، عهد المركبات وتراخيصها، وصلاحيات مرنة للمستخدمين لشعار بانا جروب",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
