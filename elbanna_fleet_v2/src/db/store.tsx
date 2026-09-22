@@ -934,8 +934,14 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }
       if (resItems.data) {
         const sorted = [...resItems.data].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-        const cloudIds = new Set(sorted.map(i => i.id));
-        const localOnly = invoiceItems.filter(i => !cloudIds.has(i.id));
+        const cloudItemIds = new Set(sorted.map(i => i.id));
+        // بنود الفاتورة بتتحذف وتتحل محلها بنود جديدة (معرفات جديدة) عند أي تعديل على الفاتورة (updateInvoice).
+        // لو اعتمدنا على مطابقة الـ id بس، أي جهاز/جلسة لسه محتفظة بالبنود القديمة (قبل التعديل) في
+        // التخزين المحلي هترجّعها تاني كـ "بنود محلية لسه مارفعتش" فتتضاعف البنود في الفاتورة نفسها.
+        // الحل: لو الفاتورة نفسها موجودة بالفعل في السحابة، نعتبر قائمة بنودها في السحابة هي المرجع
+        // الوحيد لها، ونحتفظ بالبنود المحلية بس لو خاصة بفاتورة لسه مارفعتش للسحابة أصلاً.
+        const cloudInvoiceIds = new Set((resInvoices.data || []).map((i: any) => i.id));
+        const localOnly = invoiceItems.filter(i => !cloudItemIds.has(i.id) && !cloudInvoiceIds.has(i.invoice_id));
         setInvoiceItems([...sorted, ...localOnly]);
       }
       if (resLogs.data) {
