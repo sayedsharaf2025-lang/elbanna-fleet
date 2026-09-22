@@ -39,7 +39,7 @@ export const DashboardAnalytics: React.FC = () => {
   const totalViolationsAmount = db.violations.reduce((sum, v) => sum + v.amount, 0);
   
   // Expiration states
-  const currentDate = new Date("2026-06-06");
+  const currentDate = new Date();
   const expiredCars = db.cars.filter(car => {
     const expDate = new Date(car.license_end_date);
     return expDate < currentDate;

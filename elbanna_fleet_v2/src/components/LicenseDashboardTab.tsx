@@ -138,7 +138,7 @@ export const LicenseDashboardTab: React.FC = () => {
   // Real-time toast indicators
   const [showToast, setShowToast] = useState(false);
 
-  const currentDate = new Date("2026-06-06");
+  const currentDate = new Date();
 
   // Determine license state for a car
   const getLicenseStatus = (car: Car) => {

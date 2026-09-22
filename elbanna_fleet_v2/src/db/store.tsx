@@ -1720,6 +1720,11 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     // بسبب قيد Foreign Key، وترجع السيارة تظهر تاني بعد أول مزامنة)
     const affectedInvoiceIds = invoices.filter(inv => inv.car_id === id).map(inv => inv.id);
     const affectedInvoiceItemIds = invoiceItems.filter(it => it.car_id === id).map(it => it.id);
+    // نفك ارتباط حركات حساب السائقين (خصومات/مخالصات مربوطة بسيارة) وطلبات النقل المرتبطة
+    // بالسيارة دي كمان، لنفس السبب: لو فضلت مربوطة بمعرف سيارة محذوف هترفض في السحابة بقيد
+    // Foreign Key وترجع السيارة تظهر تاني بعد أول مزامنة (زي ما كان بيحصل مع الفواتير)
+    const affectedMovementIds = movements.filter(m => m.car_id === id).map(m => m.id);
+    const affectedRequestIds = transportRequests.filter(r => r.assigned_car_id === id).map(r => r.id);
 
     setCars(prev => prev.filter(c => c.id !== id));
     if (affectedInvoiceIds.length > 0) {
@@ -1727,6 +1732,12 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
     if (affectedInvoiceItemIds.length > 0) {
       setInvoiceItems(prev => prev.map(it => it.car_id === id ? { ...it, car_id: '' } : it));
+    }
+    if (affectedMovementIds.length > 0) {
+      setMovements(prev => prev.map(m => m.car_id === id ? { ...m, car_id: undefined } : m));
+    }
+    if (affectedRequestIds.length > 0) {
+      setTransportRequests(prev => prev.map(r => r.assigned_car_id === id ? { ...r, assigned_car_id: undefined } : r));
     }
 
     const supabase = getSupabaseClient();
@@ -1740,6 +1751,14 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           if (affectedInvoiceItemIds.length > 0) {
             const { error } = await supabase.from('invoice_items').update({ car_id: null }).eq('car_id', id);
             if (error) console.error("Supabase unlink invoice_items from car error:", error);
+          }
+          if (affectedMovementIds.length > 0) {
+            const { error } = await supabase.from('driver_account_movements').update({ car_id: null }).eq('car_id', id);
+            if (error) console.error("Supabase unlink driver_account_movements from car error:", error);
+          }
+          if (affectedRequestIds.length > 0) {
+            const { error } = await supabase.from('transport_requests').update({ assigned_car_id: null }).eq('assigned_car_id', id);
+            if (error) console.error("Supabase unlink transport_requests from car error:", error);
           }
           const { error: carError } = await supabase.from('cars').delete().eq('id', id);
           if (carError) {
