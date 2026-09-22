@@ -345,6 +345,12 @@ body {
   font-family: 'Cairo', 'Inter', system-ui, sans-serif !important;
 }
 
+/* Numbers/codes in the license invoice (plate no., invoice no., dates, national ID, phone, amounts) */
+.font-print-styles .font-mono,
+#a5_print_document .font-mono {
+  font-family: 'Calibri', 'JetBrains Mono', monospace !important;
+}
+
 .font-print-styles *,
 #a5_print_document * {
   color: #1e293b;
