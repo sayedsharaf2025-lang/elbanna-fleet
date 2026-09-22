@@ -345,7 +345,8 @@ export const LicenseDashboardTab: React.FC = () => {
   .header { text-align: center; border-bottom: 3px double #1e293b; padding-bottom: 12px; margin-bottom: 16px; }
   .header h1 { font-size: 20px; font-weight: 900; }
   .header h2 { font-size: 13px; color: #555; margin-top: 4px; }
-  .car-plate { display: inline-block; background: #f1f5f9; border: 2px solid #334155; border-radius: 8px; padding: 6px 20px; font-size: 22px; font-weight: 900; font-family: monospace; letter-spacing: 2px; margin: 8px 0; }
+  .car-plate { display: inline-block; background: #f1f5f9; border: 2px solid #334155; border-radius: 8px; padding: 6px 20px; font-size: 22px; font-weight: 900; font-family: 'Calibri', monospace; letter-spacing: 2px; margin: 8px 0; }
+  .value.font-mono { font-family: 'Calibri', monospace; }
   .status-badge { display: inline-block; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 900; margin-top: 6px; }
   .status-expired { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
   .status-near { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }

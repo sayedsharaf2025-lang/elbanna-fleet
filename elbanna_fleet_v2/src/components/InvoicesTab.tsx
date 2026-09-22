@@ -152,7 +152,7 @@ export const InvoicesTab: React.FC = () => {
       carId: "",
       licenseDetails: "رسوم تجديد فحص قشرة طفاية وتأمين مروري سنوي",
       licenseLocation: "مرور عبود فرعي الجيزة",
-      carLocation: "جراج دفرة الرئيسي",
+      carLocation: "منيا القمح",
       invoiceDate: new Date().toISOString().split('T')[0],
       items: [
         { id: "init_row_1", description: "رسوم فحص فني وبيئي وتجديد طفايات حريق", paymentMethod: 'cash', accountId: '', amount: 1000 }
@@ -203,7 +203,7 @@ export const InvoicesTab: React.FC = () => {
         carId: "",
         licenseDetails: "رسوم تجديد فحص دوري",
         licenseLocation: "مرور العباسية الرئيسي",
-        carLocation: "",
+        carLocation: "منيا القمح",
         invoiceDate: new Date().toISOString().split('T')[0],
         items: [
           { id: "init_item_" + Date.now(), description: "بند تجديد روتيني وطوابع فحص مائي", paymentMethod: 'cash', accountId: '', amount: 500 }
@@ -392,7 +392,7 @@ export const InvoicesTab: React.FC = () => {
             carId: "",
             licenseDetails: "رسوم تجديد فحص قشرة طفاية وتأمين",
             licenseLocation: "مرور عبود",
-            carLocation: "",
+            carLocation: "منيا القمح",
             invoiceDate: new Date().toISOString().split('T')[0],
             items: [
               { id: "init_row_" + Date.now(), description: "رسوم فحص فني وبيئي وتجديد طفايات حريق", paymentMethod: 'cash', accountId: '', amount: 1000 }
@@ -1078,6 +1078,13 @@ export const InvoicesTab: React.FC = () => {
               {db.cars.map(c => <option key={c.id} value={c.car_number} />)}
             </datalist>
 
+            {/* قائمة اقتراحات لبنود الصرف المخزّنة مسبقًا — لتسهيل استكمال الكتابة مع إمكانية التعديل الكامل */}
+            <datalist id="invoice-item-desc-datalist">
+              {Array.from(new Set(db.invoiceItems.map(it => it.description).filter(Boolean))).map(desc => (
+                <option key={desc} value={desc} />
+              ))}
+            </datalist>
+
             {/* List draft vouchers side by side or vertical bento stack */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               {draftVouchers.map((v, index) => {
@@ -1148,6 +1155,10 @@ export const InvoicesTab: React.FC = () => {
                                   const cleaned = val.replace(/\s/g, '');
                                   const matched = cleaned ? db.cars.find(c => c.car_number.replace(/\s/g, '') === cleaned) : undefined;
                                   handleUpdateDraftHeader(v.id, 'carId', matched ? matched.id : '');
+                                  // إحضار مكان الترخيص / إدارة المرور تلقائيًا من بيانات السيارة المسجلة عند اختيارها
+                                  if (matched && matched.traffic_office) {
+                                    handleUpdateDraftHeader(v.id, 'licenseLocation', matched.traffic_office);
+                                  }
                                 }}
                               />
                               {searchVal && (
@@ -1241,6 +1252,8 @@ export const InvoicesTab: React.FC = () => {
                               <input
                                 type="text"
                                 required
+                                list="invoice-item-desc-datalist"
+                                autoComplete="off"
                                 className="w-full p-1.5 rounded border border-slate-850 bg-slate-950 text-[11px]"
                                 placeholder="فحص طفايات / تأمين / طابع..."
                                 value={row_item.description}
