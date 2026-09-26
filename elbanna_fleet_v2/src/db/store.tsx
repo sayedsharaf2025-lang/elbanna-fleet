@@ -161,6 +161,7 @@ interface DbContextType {
   addOfficial: (official: Omit<Official, 'id'>) => Official;
   updateCustody: (id: string, cashDelta: number, visaDelta: number) => void;
   updateOfficialPassword: (id: string, newPassword: string) => void;
+  updateOfficialName: (id: string, newName: string) => void;
   deleteOfficial: (id: string) => void;
 
   // Custody Accounts Actions
@@ -217,6 +218,10 @@ interface DbContextType {
   addCompany: (name: string) => void;
   deleteCompany: (name: string) => void;
 
+  // خريطة صلاحيات الشاشات القابلة للتعديل لكل رتبة
+  rolePermissions: Record<string, string[]>;
+  updateRolePermissions: (role: string, screenIds: string[]) => void;
+
   // Local offline backup and restore features
   exportLocalBackup: () => string;
   importLocalBackup: (jsonData: string) => { success: boolean; message: string };
@@ -238,6 +243,16 @@ interface DbContextType {
 
 const DbContext = createContext<DbContextType | undefined>(undefined);
 
+// خريطة الصلاحيات الافتراضية للشاشات لكل رتبة — نفس القيم اللي كانت متثبتة (hardcoded) قبل كده
+// في App.tsx، وبقت دلوقتي قابلة للتعديل من شاشة "خريطة صلاحيات الشاشات"
+const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
+  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings'],
+  supervisor: ['custody_licensing', 'license_tracking', 'reports'],
+  manager: ['reports'],
+  movement_supervisor: ['requests_tracking'],
+  requests_agent: ['transport_requests'],
+};
+
 export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const loadSavedArray = <T,>(key: string, defaultValue: T[]): T[] => {
     try {
@@ -245,6 +260,22 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.warn(`Error parsing localStorage key "${key}":`, e);
+    }
+    return defaultValue;
+  };
+
+  // زي loadSavedArray بالظبط بس لكائن (object) مش مصفوفة — مستخدمة لخريطة صلاحيات الشاشات لكل رتبة
+  const loadSavedObject = <T extends Record<string, any>>(key: string, defaultValue: T): T => {
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return { ...defaultValue, ...parsed };
+        }
       }
     } catch (e) {
       console.warn(`Error parsing localStorage key "${key}":`, e);
@@ -607,6 +638,24 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const [farms, setFarms] = useState<string[]>(() =>
     loadSavedArray('elbanna_farms', [])
   );
+
+  // خريطة صلاحيات الشاشات القابلة للتعديل لكل رتبة (بدل الثابت المُقفل قديمًا في App.tsx)
+  const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>(() =>
+    loadSavedObject('elbanna_role_permissions', DEFAULT_ROLE_PERMISSIONS)
+  );
+
+  const updateRolePermissions = (role: string, screenIds: string[]) => {
+    setRolePermissions(prev => {
+      const next = { ...prev, [role]: screenIds };
+      localStorage.setItem('elbanna_role_permissions', JSON.stringify(next));
+      const supabase = getSupabaseClient();
+      if (supabase && isCloudConnected) {
+        supabase.from('system_settings').upsert({ key: 'role_permissions', value: JSON.stringify(next) })
+          .then(({ error }) => { if (error) console.warn("Supabase save role_permissions error:", error); });
+      }
+      return next;
+    });
+  };
 
   const addFarmIfNew = (farmName: string) => {
     const trimmed = farmName.trim();
@@ -1041,6 +1090,17 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             if (row.key === 'requests_agent_password' && row.value) {
               _setRequestsAgentPassword(row.value);
               localStorage.setItem('elbanna_requests_agent_password', row.value);
+            }
+            if (row.key === 'role_permissions' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                  setRolePermissions(prev => ({ ...prev, ...parsed }));
+                  localStorage.setItem('elbanna_role_permissions', JSON.stringify({ ...DEFAULT_ROLE_PERMISSIONS, ...parsed }));
+                }
+              } catch (e) {
+                console.warn("Parse role_permissions JSON error", e);
+              }
             }
           });
         }
@@ -1892,6 +1952,36 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         password: newPassword
       }).eq('id', id).then(({ error }) => {
         if (error) console.error("Supabase update official password error:", error);
+      });
+    }
+  };
+
+  // تغيير اسم مشرف الصرف (اسم المستخدم الظاهر بالنظام)
+  const updateOfficialName = (id: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    let updatedParent: Official | undefined;
+    setOfficials(prev => prev.map(o => {
+      if (o.id === id) {
+        updatedParent = { ...o, name: trimmed };
+        return updatedParent;
+      }
+      return o;
+    }));
+
+    // لو المستخدم الحالي المسجل دخوله دلوقتي هو نفسه المشرف ده، نحدّث اسمه في الجلسة النشطة كمان
+    if (currentUser?.role === 'supervisor' && currentUser.officialId === id) {
+      const updatedUser = { ...currentUser, name: trimmed };
+      setCurrentUser(updatedUser);
+      localStorage.setItem('elbanna_current_user', JSON.stringify(updatedUser));
+    }
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected && updatedParent) {
+      supabase.from('officials').update({
+        name: trimmed
+      }).eq('id', id).then(({ error }) => {
+        if (error) console.error("Supabase update official name error:", error);
       });
     }
   };
@@ -3412,6 +3502,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         deleteOfficial,
         updateCustody,
         updateOfficialPassword,
+        updateOfficialName,
         addCustodyAccount,
         updateCustodyAccount,
         deleteCustodyAccount,
@@ -3434,6 +3525,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         hiddenCompanies,
         addCompany,
         deleteCompany,
+        rolePermissions,
+        updateRolePermissions,
         resetToInitial,
         exportLocalBackup,
         importLocalBackup,

@@ -14,8 +14,32 @@ import {
   Clock,
   Info,
   Truck,
-  ClipboardList
+  ClipboardList,
+  Pencil
 } from 'lucide-react';
+
+// قائمة كل شاشات النظام (المعرّف + الاسم الظاهر) — لازم تفضل متطابقة مع navStructure في App.tsx
+const ALL_SCREENS: { id: string; label: string }[] = [
+  { id: 'dashboard', label: 'لوحة التحكم والتحليلات الحية' },
+  { id: 'transport_requests', label: 'طلبات النقل' },
+  { id: 'users_settings', label: 'حماية وإعدادات حسابات النظام' },
+  { id: 'fleet', label: 'إعدادات السيارات والسائقين (Excel)' },
+  { id: 'violations', label: 'تسجيل المخالفات وتفادي التكرار' },
+  { id: 'requests_tracking', label: 'متابعة الطلبات' },
+  { id: 'license_tracking', label: 'متابعة وتحديث التراخيص المتقدمة' },
+  { id: 'custody_licensing', label: 'فواتير تراخيص' },
+  { id: 'deductions', label: 'الخصومات الفردية والجماعية' },
+  { id: 'cross_accounts', label: 'أرشيف وحسابات السائقين (شهرية)' },
+  { id: 'reports', label: 'شاشة التقارير والمطبوعات الموحدة' },
+];
+
+const ALL_ROLES: { id: 'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent'; label: string }[] = [
+  { id: 'admin', label: 'أدمن النظام' },
+  { id: 'manager', label: 'المدير العام' },
+  { id: 'supervisor', label: 'مشرف صرف ميداني' },
+  { id: 'movement_supervisor', label: 'مشرف الحركة' },
+  { id: 'requests_agent', label: 'مستخدم طلبات النقل' },
+];
 
 export function UsersSettingsTab() {
   const db = useDb();
@@ -36,6 +60,10 @@ export function UsersSettingsTab() {
   // Change individual official's password state
   const [editingOfficialId, setEditingOfficialId] = useState('');
   const [newPasswordForOfficial, setNewPasswordForOfficial] = useState('');
+
+  // Change individual official's name (username) state
+  const [editingNameOfficialId, setEditingNameOfficialId] = useState('');
+  const [newNameForOfficial, setNewNameForOfficial] = useState('');
 
   // Password visibility maps (by official.id)
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
@@ -138,6 +166,27 @@ export function UsersSettingsTab() {
     // Reset editing states
     setEditingOfficialId('');
     setNewPasswordForOfficial('');
+  };
+
+  // Change individual Supervisor's username (name) action
+  const handleUpdateOfficialName = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNameOfficialId) return;
+    const trimmed = newNameForOfficial.trim();
+    if (!trimmed) {
+      showNotification('error', 'يرجى إدخال اسم مستخدم صحيح (لا يمكن أن يكون فارغًا)');
+      return;
+    }
+
+    const official = db.officials.find(o => o.id === editingNameOfficialId);
+    if (!official) return;
+
+    db.updateOfficialName(editingNameOfficialId, trimmed);
+    showNotification('success', `تم تغيير اسم المستخدم من "${official.name}" إلى "${trimmed}" بنجاح.`);
+
+    // Reset editing states
+    setEditingNameOfficialId('');
+    setNewNameForOfficial('');
   };
 
   // Change Admin password submit action
@@ -344,7 +393,49 @@ export function UsersSettingsTab() {
                       <tr key={off.id} className="border-b border-slate-850/60 hover:bg-slate-950/20 text-slate-300">
                         <td className="py-3.5 px-2 font-mono text-center text-slate-500">{index + 1}</td>
                         <td className="py-3.5 px-3 font-mono text-slate-500 text-[10px]">@{off.id}</td>
-                        <td className="py-3.5 px-3 font-extrabold text-slate-205">{off.name}</td>
+                        <td className="py-3.5 px-3 font-extrabold text-slate-205">
+                          {editingNameOfficialId === off.id ? (
+                            <form onSubmit={handleUpdateOfficialName} className="flex gap-1.5 max-w-[190px]">
+                              <input
+                                type="text"
+                                required
+                                autoFocus
+                                placeholder="اسم المستخدم الجديد"
+                                value={newNameForOfficial}
+                                onChange={(e) => setNewNameForOfficial(e.target.value)}
+                                className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-200 outline-none w-28 focus:border-emerald-500"
+                              />
+                              <button
+                                type="submit"
+                                className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-2 py-1 rounded text-[10px] font-black"
+                              >
+                                حفظ
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingNameOfficialId('')}
+                                className="bg-slate-800 text-slate-300 px-2 py-1 rounded text-[10px]"
+                              >
+                                إلغاء
+                              </button>
+                            </form>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <span>{off.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingNameOfficialId(off.id);
+                                  setNewNameForOfficial(off.name);
+                                }}
+                                className="text-slate-500 hover:text-emerald-400 p-0.5"
+                                title="تغيير اسم المستخدم"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </td>
                         
                         <td className="py-3.5 px-3">
                           {isEditing ? (
@@ -870,7 +961,7 @@ export function UsersSettingsTab() {
         </div>
       )}
 
-      {/* Tab Case C: Permissions Mapping */}
+      {/* Tab Case C: Permissions Mapping — قابلة للتعديل بالكامل (إضافة/تعديل/حذف صلاحية شاشة لكل رتبة) */}
       {activeSubTab === 'permissions' && (
         <div className="bg-slate-900 border border-slate-850 rounded-2xl p-5 space-y-4">
           <div className="border-b border-slate-800 pb-3">
@@ -878,107 +969,51 @@ export function UsersSettingsTab() {
               <Layers className="w-5 h-5 text-emerald-400" />
               <span>خريطة وحوكمة الصلاحيات وحظر الشاشات للمستخدمين (Role Matrix)</span>
             </h3>
-            <p className="text-[11px] text-slate-400 mt-1">يتحكم النظام صارمًا فنيًا في الجلسة ومنع تداخل العمليات لمنع التلاعب المالي والمصرفي بمحفظة البنا جروب اللوجستية.</p>
+            <p className="text-[11px] text-slate-400 mt-1">فعّل أو ألغِ صلاحية أي شاشة لأي رتبة مباشرة من الجدول — يتم تفعيل التغيير فورًا لكل مستخدمي الرتبة ومزامنته سحابيًا.</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
-            
-            {/* Box Role 1: Admin */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-rose-500/10 space-y-3 relative overflow-hidden">
-              <div className="absolute right-0 top-0 w-12 h-12 bg-rose-500/5 rounded-full blur"></div>
-              <div className="flex justify-between items-center">
-                <span className="font-extrabold text-xs text-rose-400 bg-rose-550/10 px-2 py-0.5 rounded-md border border-rose-500/10">صلاحية مطلقة</span>
-                <h4 className="font-black text-slate-100 text-sm">👤 أدمن النظام الرئيسي (Admin)</h4>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed text-right">المالك الفني والمحاسبي الكامل للنظام. يتم فك الحظر ومظلة الحماية له عبر كافة البوابات لتأسيس وحوكمة الشركات.</p>
-              
-              <div className="border-t border-slate-850/50 pt-2.5 space-y-1.5 text-[10px]">
-                <p className="font-bold text-slate-300">الشاشات المتاحة للرتبة (10 شاشات):</p>
-                <div className="flex flex-wrap gap-1">
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">لوحة التحليلات</span>
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">طلبات النقل</span>
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">السيارات والسائقين</span>
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">تسجيل المخالفات</span>
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">متابعة الطلبات</span>
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">الخصومات المجمعة</span>
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">تسوية وتحصيل فواتير</span>
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">المقاصة المالية</span>
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">تراخيص الأسطول</span>
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">التقارير للطباعة</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Box Role 2: Manager */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/10 space-y-3 relative overflow-hidden">
-              <div className="absolute right-0 top-0 w-12 h-12 bg-emerald-500/5 rounded-full blur"></div>
-              <div className="flex justify-between items-center">
-                <span className="font-extrabold text-xs text-emerald-400 bg-emerald-550/10 px-2 py-0.5 rounded-md border border-emerald-500/10">تدقيق مالي</span>
-                <h4 className="font-black text-slate-100 text-sm">📈 المدير العام (Manager)</h4>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed text-right">مخصص لمدير شركة وعائلة البنا. مخول فقط للإشراف وسحب التقارير الإدارية، الكشوفات، الدفعات، والصادرات المجمعة وتراخيص المركبات لطباعة كشوف الإخلاء.</p>
-              
-              <div className="border-t border-slate-850/50 pt-2.5 space-y-1.5 text-[10px]">
-                <p className="font-bold text-slate-300">الشاشات المتاحة للرتبة (شاشة واحدة):</p>
-                <div className="flex flex-wrap gap-1">
-                  <span className="bg-slate-900 text-slate-400 border border-slate-800 px-1.5 py-0.5 rounded">شاشة التقارير والمطبوعات الموحدة</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Box Role 3: Supervisor */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/10 space-y-3 relative overflow-hidden">
-              <div className="absolute right-0 top-0 w-12 h-12 bg-indigo-500/5 rounded-full blur"></div>
-              <div className="flex justify-between items-center">
-                <span className="font-extrabold text-xs text-indigo-400 bg-indigo-550/10 px-2 py-0.5 rounded-md border border-indigo-500/10">ميداني صرف</span>
-                <h4 className="font-black text-slate-100 text-sm">🧑‍✈️ مشرف صرف ميداني (Supervisor)</h4>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed text-right">مشرف الصرف المختص بالمكتب الميداني. مخول بتسجيل الفواتير للتراخيص والفحص من حساب العهدة المسند له ومتابعة مواعيد التجديد وتراخيص سيارات البنا جروب.</p>
-              
-              <div className="border-t border-slate-850/50 pt-2.5 space-y-1.5 text-[10px]">
-                <p className="font-bold text-slate-300">الشاشات المتاحة للرتبة (3 شاشات):</p>
-                <div className="flex flex-wrap gap-1">
-                  <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded">تسوية وتحصيل فواتير العهد</span>
-                  <span className="bg-slate-900 text-slate-405 border border-slate-800 px-1.5 py-0.5 rounded">تراخيص أسطول السيارات</span>
-                  <span className="bg-slate-900 text-slate-405 border border-slate-800 px-1.5 py-0.5 rounded">شاشة التقارير الموحدة للطباعة</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Box Role 4: Movement Supervisor */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-indigo-500/10 space-y-3 relative overflow-hidden">
-              <div className="absolute right-0 top-0 w-12 h-12 bg-indigo-500/5 rounded-full blur"></div>
-              <div className="flex justify-between items-center">
-                <span className="font-extrabold text-xs text-indigo-400 bg-indigo-550/10 px-2 py-0.5 rounded-md border border-indigo-500/10">حركة ونقل</span>
-                <h4 className="font-black text-slate-100 text-sm">🚚 مشرف الحركة (Movement Supervisor)</h4>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed text-right">مخول بمراجعة طلبات النقل الواردة من المزارع والرد عليها بسيارة مناسبة، مع ربط السائق تلقائيًا، ومتابعة الطلبات الجارية حتى التسليم.</p>
-              
-              <div className="border-t border-slate-850/50 pt-2.5 space-y-1.5 text-[10px]">
-                <p className="font-bold text-slate-300">الشاشات المتاحة للرتبة (شاشة واحدة):</p>
-                <div className="flex flex-wrap gap-1">
-                  <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded">متابعة الطلبات</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Box Role 5: Requests Agent */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-amber-500/10 space-y-3 relative overflow-hidden">
-              <div className="absolute right-0 top-0 w-12 h-12 bg-amber-500/5 rounded-full blur"></div>
-              <div className="flex justify-between items-center">
-                <span className="font-extrabold text-xs text-amber-400 bg-amber-550/10 px-2 py-0.5 rounded-md border border-amber-500/10">تسجيل طلبات</span>
-                <h4 className="font-black text-slate-100 text-sm">📋 مستخدم طلبات النقل (Requests Agent)</h4>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed text-right">مخول بتسجيل طلبات نقل جديدة من المزارع (اسم الطالب، المزرعة، نوع السيارة، وصف الحمولة)، ومتابعة حالة الطلبات السابقة.</p>
-              
-              <div className="border-t border-slate-850/50 pt-2.5 space-y-1.5 text-[10px]">
-                <p className="font-bold text-slate-300">الشاشات المتاحة للرتبة (شاشة واحدة):</p>
-                <div className="flex flex-wrap gap-1">
-                  <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded">طلبات النقل</span>
-                </div>
-              </div>
-            </div>
-
+          <div className="overflow-x-auto text-xs font-sans">
+            <table className="w-full text-right border-collapse">
+              <thead>
+                <tr className="bg-slate-950 text-slate-400 border-b border-slate-850">
+                  <th className="py-3 px-3 sticky right-0 bg-slate-950">الشاشة</th>
+                  {ALL_ROLES.map(role => (
+                    <th key={role.id} className="py-3 px-2 text-center min-w-[110px]">{role.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ALL_SCREENS.map(screen => (
+                  <tr key={screen.id} className="border-b border-slate-850/60 hover:bg-slate-950/20 text-slate-300">
+                    <td className="py-2.5 px-3 font-bold text-slate-250 sticky right-0 bg-slate-900">{screen.label}</td>
+                    {ALL_ROLES.map(role => {
+                      const currentScreens = db.rolePermissions?.[role.id] || [];
+                      const isChecked = currentScreens.includes(screen.id);
+                      // نمنع إلغاء صلاحية أدمن النظام على شاشة "حماية وإعدادات حسابات النظام" نفسها
+                      // حتى لا يفقد الأدمن قدرته على الرجوع وتعديل الصلاحيات مرة أخرى
+                      const isLockedCell = role.id === 'admin' && screen.id === 'users_settings';
+                      return (
+                        <td key={role.id} className="py-2.5 px-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            disabled={isLockedCell}
+                            title={isLockedCell ? 'لا يمكن إلغاء وصول الأدمن لشاشة الصلاحيات نفسها، منعًا لفقد السيطرة على النظام' : undefined}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                                ? [...currentScreens, screen.id]
+                                : currentScreens.filter(id => id !== screen.id);
+                              db.updateRolePermissions(role.id, next);
+                            }}
+                            className="w-4 h-4 accent-emerald-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                          />
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
           <p className="text-[10px] text-slate-500 leading-relaxed text-right border-t border-slate-850/50 pt-3">

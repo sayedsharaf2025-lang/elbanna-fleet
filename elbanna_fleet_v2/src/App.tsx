@@ -43,26 +43,13 @@ import {
 function DashboardLayout() {
   const db = useDb();
 
-  // Filter tab list based on logged-in user role
+  // Filter tab list based on logged-in user role — دلوقتي بيتحسب من خريطة الصلاحيات القابلة للتعديل
+  // من شاشة "إدارة مستخدمي النظام والصلاحيات" بدل القائمة الثابتة قديمًا
   const allowedTabs = React.useMemo(() => {
     const role = db.currentUser?.role;
-    if (role === 'admin') {
-      return ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings'];
-    }
-    if (role === 'supervisor') {
-      return ['custody_licensing', 'license_tracking', 'reports'];
-    }
-    if (role === 'manager') {
-      return ['reports'];
-    }
-    if (role === 'movement_supervisor') {
-      return ['requests_tracking'];
-    }
-    if (role === 'requests_agent') {
-      return ['transport_requests'];
-    }
-    return [];
-  }, [db.currentUser]);
+    if (!role) return [];
+    return db.rolePermissions?.[role] || [];
+  }, [db.currentUser, db.rolePermissions]);
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -83,6 +70,28 @@ function DashboardLayout() {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // تسجيل خروج تلقائي بعد 30 ثانية من عدم النشاط (بدون حركة ماوس/لمس/كتابة/سكرول/ضغط)
+  useEffect(() => {
+    const IDLE_LIMIT_MS = 30 * 1000;
+    let idleTimer: ReturnType<typeof setTimeout>;
+
+    const resetIdleTimer = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        db.logout();
+      }, IDLE_LIMIT_MS);
+    };
+
+    const activityEvents: Array<keyof WindowEventMap> = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel', 'click'];
+    activityEvents.forEach(evt => window.addEventListener(evt, resetIdleTimer, { passive: true }));
+    resetIdleTimer();
+
+    return () => {
+      clearTimeout(idleTimer);
+      activityEvents.forEach(evt => window.removeEventListener(evt, resetIdleTimer));
+    };
+  }, [db.currentUser]);
 
   // هيكل التنقل: شاشتين مستقلتين (الرئيسية والتقارير) + أربع مجموعات رئيسية تحوي باقي الشاشات
   const navStructure = [
