@@ -43,13 +43,18 @@ import {
 function DashboardLayout() {
   const db = useDb();
 
-  // Filter tab list based on logged-in user role — دلوقتي بيتحسب من خريطة الصلاحيات القابلة للتعديل
-  // من شاشة "إدارة مستخدمي النظام والصلاحيات" بدل القائمة الثابتة قديمًا
+  // Filter tab list based on logged-in user — دلوقتي بيتحسب من خريطة الصلاحيات القابلة للتعديل من
+  // شاشة "إدارة مستخدمي النظام والصلاحيات"، ولمشرفي الصرف تحديدًا من شاشاته الخاصة (لو محددة له)
+  // قبل الرجوع لصلاحيات رتبة "مشرف صرف" المشتركة — بحيث أي تعديل يتفعّل فورًا من غير تسجيل خروج
   const allowedTabs = React.useMemo(() => {
-    const role = db.currentUser?.role;
-    if (!role) return [];
-    return db.rolePermissions?.[role] || [];
-  }, [db.currentUser, db.rolePermissions]);
+    const user = db.currentUser;
+    if (!user) return [];
+    if (user.role === 'supervisor' && user.officialId) {
+      const customScreens = db.officialCustomScreens?.[user.officialId];
+      if (customScreens && customScreens.length > 0) return customScreens;
+    }
+    return db.rolePermissions?.[user.role] || [];
+  }, [db.currentUser, db.rolePermissions, db.officialCustomScreens]);
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -156,7 +161,7 @@ function DashboardLayout() {
             <div className="flex items-center gap-3 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
               <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
               <span className="text-slate-300 font-extrabold whitespace-nowrap">
-                {db.currentUser?.role === 'admin' ? '👤 مدير النظام' : db.currentUser?.role === 'manager' ? '📈 المدير المالي' : db.currentUser?.role === 'movement_supervisor' ? '🚚 مشرف الحركة' : db.currentUser?.role === 'requests_agent' ? '📋 مستخدم طلبات النقل' : `🧑‍✈️ مشرف: ${db.currentUser?.username}`}
+                {db.currentUser?.role === 'admin' ? '👤 مدير النظام' : db.currentUser?.role === 'manager' ? '📈 المدير المالي' : db.currentUser?.role === 'movement_supervisor' ? '🚚 مشرف الحركة' : db.currentUser?.role === 'requests_agent' ? '📋 مستخدم طلبات النقل' : `🧑‍✈️ مشرف: ${db.currentUser?.name || db.currentUser?.username}`}
               </span>
               <button
                 onClick={() => db.logout()}

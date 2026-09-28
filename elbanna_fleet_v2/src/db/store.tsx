@@ -239,6 +239,19 @@ interface DbContextType {
   updateManagerPassword?: (newPass: string) => void;
   updateMovementSupervisorPassword?: (newPass: string) => void;
   updateRequestsAgentPassword?: (newPass: string) => void;
+  // أسماء المستخدمين القابلة للتعديل لكل حساب (بدل الاسم الثابت المقفول قديمًا)
+  adminUsername: string;
+  managerUsername: string;
+  movementSupervisorUsername: string;
+  requestsAgentUsername: string;
+  updateAdminUsername: (newUsername: string) => void;
+  updateManagerUsername: (newUsername: string) => void;
+  updateMovementSupervisorUsername: (newUsername: string) => void;
+  updateRequestsAgentUsername: (newUsername: string) => void;
+  // شاشات مخصصة لكل مشرف صرف بعينه (official) — غير مرتبطة بالرتبة المشتركة، تسمح بإضافة
+  // أي مستخدم وتحديد شاشاته الخاصة بدل التقييد بقسم ثابت. المفتاح official.id.
+  officialCustomScreens: Record<string, string[]>;
+  updateOfficialScreens: (officialId: string, screenIds: string[] | null) => void;
 }
 
 const DbContext = createContext<DbContextType | undefined>(undefined);
@@ -346,6 +359,38 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     localStorage.getItem('elbanna_manager_password') || 'manager'
   );
 
+  // أسماء المستخدمين القابلة للتعديل لكل حساب من الحسابات الثابتة (بدل الاسم المقفول قديمًا)
+  const [adminUsername, _setAdminUsername] = useState<string>(() =>
+    localStorage.getItem('elbanna_admin_username') || 'admin'
+  );
+  const [managerUsername, _setManagerUsername] = useState<string>(() =>
+    localStorage.getItem('elbanna_manager_username') || 'manager'
+  );
+
+  const updateAdminUsername = (newUsername: string) => {
+    const trimmed = newUsername.trim();
+    if (!trimmed) return;
+    _setAdminUsername(trimmed);
+    localStorage.setItem('elbanna_admin_username', trimmed);
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'admin_username', value: trimmed })
+        .then(({ error }) => { if (error) console.warn("Supabase save admin_username error:", error); });
+    }
+  };
+
+  const updateManagerUsername = (newUsername: string) => {
+    const trimmed = newUsername.trim();
+    if (!trimmed) return;
+    _setManagerUsername(trimmed);
+    localStorage.setItem('elbanna_manager_username', trimmed);
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'manager_username', value: trimmed })
+        .then(({ error }) => { if (error) console.warn("Supabase save manager_username error:", error); });
+    }
+  };
+
   const updateAdminPassword = (newPass: string) => {
     _setAdminPassword(newPass);
     localStorage.setItem('elbanna_admin_password', newPass);
@@ -377,6 +422,37 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const [requestsAgentPassword, _setRequestsAgentPassword] = useState<string>(() =>
     localStorage.getItem('elbanna_requests_agent_password') || 'requests123'
   );
+
+  const [movementSupervisorUsername, _setMovementSupervisorUsername] = useState<string>(() =>
+    localStorage.getItem('elbanna_movement_supervisor_username') || 'movement_supervisor'
+  );
+  const [requestsAgentUsername, _setRequestsAgentUsername] = useState<string>(() =>
+    localStorage.getItem('elbanna_requests_agent_username') || 'requests_agent'
+  );
+
+  const updateMovementSupervisorUsername = (newUsername: string) => {
+    const trimmed = newUsername.trim();
+    if (!trimmed) return;
+    _setMovementSupervisorUsername(trimmed);
+    localStorage.setItem('elbanna_movement_supervisor_username', trimmed);
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'movement_supervisor_username', value: trimmed })
+        .then(({ error }) => { if (error) console.warn("Supabase save movement_supervisor_username error:", error); });
+    }
+  };
+
+  const updateRequestsAgentUsername = (newUsername: string) => {
+    const trimmed = newUsername.trim();
+    if (!trimmed) return;
+    _setRequestsAgentUsername(trimmed);
+    localStorage.setItem('elbanna_requests_agent_username', trimmed);
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'requests_agent_username', value: trimmed })
+        .then(({ error }) => { if (error) console.warn("Supabase save requests_agent_username error:", error); });
+    }
+  };
 
   const updateMovementSupervisorPassword = (newPass: string) => {
     _setMovementSupervisorPassword(newPass);
@@ -421,20 +497,30 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     
     if (role === 'admin') {
       let savedAdminPass = adminPassword;
+      let savedAdminUser = adminUsername;
       if (supabase) {
         try {
-          const { data, error } = await supabase.from('system_settings').select('value').eq('key', 'admin_password').maybeSingle();
-          if (!error && data && data.value) {
-            savedAdminPass = data.value;
-            _setAdminPassword(data.value);
-            localStorage.setItem('elbanna_admin_password', data.value);
+          const { data, error } = await supabase.from('system_settings').select('key, value').in('key', ['admin_password', 'admin_username']);
+          if (!error && data) {
+            const passRow = data.find(r => r.key === 'admin_password');
+            const userRow = data.find(r => r.key === 'admin_username');
+            if (passRow?.value) {
+              savedAdminPass = passRow.value;
+              _setAdminPassword(passRow.value);
+              localStorage.setItem('elbanna_admin_password', passRow.value);
+            }
+            if (userRow?.value) {
+              savedAdminUser = userRow.value;
+              _setAdminUsername(userRow.value);
+              localStorage.setItem('elbanna_admin_username', userRow.value);
+            }
           }
         } catch (e) {
           console.warn("Direct login check error:", e);
         }
       }
-      if (username.trim().toLowerCase() === 'admin' && password === savedAdminPass) {
-        const uObj: User = { username: 'admin', role: 'admin', name: 'أدمن النظام' };
+      if (username.trim().toLowerCase() === savedAdminUser.trim().toLowerCase() && password === savedAdminPass) {
+        const uObj: User = { username: savedAdminUser, role: 'admin', name: 'أدمن النظام', allowedScreens: rolePermissions.admin || DEFAULT_ROLE_PERMISSIONS.admin };
         setCurrentUser(uObj);
         localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
         return { success: true };
@@ -442,20 +528,30 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return { success: false, error: 'اسم المستخدم أو كلمة المرور للأدمن غير صحيحة' };
     } else if (role === 'manager') {
       let savedManagerPass = managerPassword;
+      let savedManagerUser = managerUsername;
       if (supabase) {
         try {
-          const { data, error } = await supabase.from('system_settings').select('value').eq('key', 'manager_password').maybeSingle();
-          if (!error && data && data.value) {
-            savedManagerPass = data.value;
-            _setManagerPassword(data.value);
-            localStorage.setItem('elbanna_manager_password', data.value);
+          const { data, error } = await supabase.from('system_settings').select('key, value').in('key', ['manager_password', 'manager_username']);
+          if (!error && data) {
+            const passRow = data.find(r => r.key === 'manager_password');
+            const userRow = data.find(r => r.key === 'manager_username');
+            if (passRow?.value) {
+              savedManagerPass = passRow.value;
+              _setManagerPassword(passRow.value);
+              localStorage.setItem('elbanna_manager_password', passRow.value);
+            }
+            if (userRow?.value) {
+              savedManagerUser = userRow.value;
+              _setManagerUsername(userRow.value);
+              localStorage.setItem('elbanna_manager_username', userRow.value);
+            }
           }
         } catch (e) {
           console.warn("Direct login check error:", e);
         }
       }
-      if (username.trim().toLowerCase() === 'manager' && password === savedManagerPass) {
-        const uObj: User = { username: 'manager', role: 'manager', name: 'مدير عام الحركة' };
+      if (username.trim().toLowerCase() === savedManagerUser.trim().toLowerCase() && password === savedManagerPass) {
+        const uObj: User = { username: savedManagerUser, role: 'manager', name: 'مدير عام الحركة', allowedScreens: rolePermissions.manager || DEFAULT_ROLE_PERMISSIONS.manager };
         setCurrentUser(uObj);
         localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
         return { success: true };
@@ -495,7 +591,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             username: `supervisor_${officialId}`, 
             role: 'supervisor', 
             officialId, 
-            name: officialName 
+            name: officialName,
+            allowedScreens: officialCustomScreens[officialId] || rolePermissions.supervisor || DEFAULT_ROLE_PERMISSIONS.supervisor
           };
           setCurrentUser(uObj);
           localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
@@ -506,20 +603,30 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return { success: false, error: 'مشرف الصرف غير موجود بقاعدة البيانات' };
     } else if (role === 'movement_supervisor') {
       let savedPass = movementSupervisorPassword;
+      let savedUser = movementSupervisorUsername;
       if (supabase) {
         try {
-          const { data, error } = await supabase.from('system_settings').select('value').eq('key', 'movement_supervisor_password').maybeSingle();
-          if (!error && data && data.value) {
-            savedPass = data.value;
-            _setMovementSupervisorPassword(data.value);
-            localStorage.setItem('elbanna_movement_supervisor_password', data.value);
+          const { data, error } = await supabase.from('system_settings').select('key, value').in('key', ['movement_supervisor_password', 'movement_supervisor_username']);
+          if (!error && data) {
+            const passRow = data.find(r => r.key === 'movement_supervisor_password');
+            const userRow = data.find(r => r.key === 'movement_supervisor_username');
+            if (passRow?.value) {
+              savedPass = passRow.value;
+              _setMovementSupervisorPassword(passRow.value);
+              localStorage.setItem('elbanna_movement_supervisor_password', passRow.value);
+            }
+            if (userRow?.value) {
+              savedUser = userRow.value;
+              _setMovementSupervisorUsername(userRow.value);
+              localStorage.setItem('elbanna_movement_supervisor_username', userRow.value);
+            }
           }
         } catch (e) {
           console.warn("Direct login check error:", e);
         }
       }
-      if (username.trim().toLowerCase() === 'movement_supervisor' && password === savedPass) {
-        const uObj: User = { username: 'movement_supervisor', role: 'movement_supervisor', name: 'مشرف الحركة' };
+      if (username.trim().toLowerCase() === savedUser.trim().toLowerCase() && password === savedPass) {
+        const uObj: User = { username: savedUser, role: 'movement_supervisor', name: 'مشرف الحركة', allowedScreens: rolePermissions.movement_supervisor || DEFAULT_ROLE_PERMISSIONS.movement_supervisor };
         setCurrentUser(uObj);
         localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
         return { success: true };
@@ -527,20 +634,30 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return { success: false, error: 'اسم المستخدم أو كلمة المرور لمشرف الحركة غير صحيحة' };
     } else if (role === 'requests_agent') {
       let savedPass = requestsAgentPassword;
+      let savedUser = requestsAgentUsername;
       if (supabase) {
         try {
-          const { data, error } = await supabase.from('system_settings').select('value').eq('key', 'requests_agent_password').maybeSingle();
-          if (!error && data && data.value) {
-            savedPass = data.value;
-            _setRequestsAgentPassword(data.value);
-            localStorage.setItem('elbanna_requests_agent_password', data.value);
+          const { data, error } = await supabase.from('system_settings').select('key, value').in('key', ['requests_agent_password', 'requests_agent_username']);
+          if (!error && data) {
+            const passRow = data.find(r => r.key === 'requests_agent_password');
+            const userRow = data.find(r => r.key === 'requests_agent_username');
+            if (passRow?.value) {
+              savedPass = passRow.value;
+              _setRequestsAgentPassword(passRow.value);
+              localStorage.setItem('elbanna_requests_agent_password', passRow.value);
+            }
+            if (userRow?.value) {
+              savedUser = userRow.value;
+              _setRequestsAgentUsername(userRow.value);
+              localStorage.setItem('elbanna_requests_agent_username', userRow.value);
+            }
           }
         } catch (e) {
           console.warn("Direct login check error:", e);
         }
       }
-      if (username.trim().toLowerCase() === 'requests_agent' && password === savedPass) {
-        const uObj: User = { username: 'requests_agent', role: 'requests_agent', name: 'مستخدم طلبات النقل' };
+      if (username.trim().toLowerCase() === savedUser.trim().toLowerCase() && password === savedPass) {
+        const uObj: User = { username: savedUser, role: 'requests_agent', name: 'مستخدم طلبات النقل', allowedScreens: rolePermissions.requests_agent || DEFAULT_ROLE_PERMISSIONS.requests_agent };
         setCurrentUser(uObj);
         localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
         return { success: true };
@@ -652,6 +769,32 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       if (supabase && isCloudConnected) {
         supabase.from('system_settings').upsert({ key: 'role_permissions', value: JSON.stringify(next) })
           .then(({ error }) => { if (error) console.warn("Supabase save role_permissions error:", error); });
+      }
+      return next;
+    });
+  };
+
+  // شاشات مخصصة لكل مستخدم (مشرف صرف) بعينه — مستقلة تمامًا عن رتبته المشتركة، عشان تقدر
+  // تضيف أي مستخدم جديد وتحدد له شاشاته الخاصة بدل ما يكون مربوط بصلاحيات قسم/رتبة ثابتة.
+  // المفتاح هو official.id، والقيمة هي قائمة معرفات الشاشات؛ غياب المفتاح = استخدام صلاحيات
+  // رتبة "مشرف صرف" المشتركة بشكل افتراضي.
+  const [officialCustomScreens, setOfficialCustomScreens] = useState<Record<string, string[]>>(() =>
+    loadSavedObject('elbanna_official_custom_screens', {})
+  );
+
+  const updateOfficialScreens = (officialId: string, screenIds: string[] | null) => {
+    setOfficialCustomScreens(prev => {
+      const next = { ...prev };
+      if (screenIds === null) {
+        delete next[officialId];
+      } else {
+        next[officialId] = screenIds;
+      }
+      localStorage.setItem('elbanna_official_custom_screens', JSON.stringify(next));
+      const supabase = getSupabaseClient();
+      if (supabase && isCloudConnected) {
+        supabase.from('system_settings').upsert({ key: 'official_custom_screens', value: JSON.stringify(next) })
+          .then(({ error }) => { if (error) console.warn("Supabase save official_custom_screens error:", error); });
       }
       return next;
     });
@@ -1090,6 +1233,33 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             if (row.key === 'requests_agent_password' && row.value) {
               _setRequestsAgentPassword(row.value);
               localStorage.setItem('elbanna_requests_agent_password', row.value);
+            }
+            if (row.key === 'admin_username' && row.value) {
+              _setAdminUsername(row.value);
+              localStorage.setItem('elbanna_admin_username', row.value);
+            }
+            if (row.key === 'manager_username' && row.value) {
+              _setManagerUsername(row.value);
+              localStorage.setItem('elbanna_manager_username', row.value);
+            }
+            if (row.key === 'movement_supervisor_username' && row.value) {
+              _setMovementSupervisorUsername(row.value);
+              localStorage.setItem('elbanna_movement_supervisor_username', row.value);
+            }
+            if (row.key === 'requests_agent_username' && row.value) {
+              _setRequestsAgentUsername(row.value);
+              localStorage.setItem('elbanna_requests_agent_username', row.value);
+            }
+            if (row.key === 'official_custom_screens' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                  setOfficialCustomScreens(parsed);
+                  localStorage.setItem('elbanna_official_custom_screens', JSON.stringify(parsed));
+                }
+              } catch (e) {
+                console.warn("Parse official_custom_screens JSON error", e);
+              }
             }
             if (row.key === 'role_permissions' && row.value) {
               try {
@@ -1841,6 +2011,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const deleteOfficial = (id: string) => {
     setOfficials(prev => prev.filter(o => o.id !== id));
     setCustodyAccounts(prev => prev.filter(ca => ca.official_id !== id));
+
+    if (officialCustomScreens[id]) {
+      updateOfficialScreens(id, null);
+    }
 
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
@@ -3541,7 +3715,17 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         updateAdminPassword,
         updateManagerPassword,
         updateMovementSupervisorPassword,
-        updateRequestsAgentPassword
+        updateRequestsAgentPassword,
+        adminUsername,
+        managerUsername,
+        movementSupervisorUsername,
+        requestsAgentUsername,
+        updateAdminUsername,
+        updateManagerUsername,
+        updateMovementSupervisorUsername,
+        updateRequestsAgentUsername,
+        officialCustomScreens,
+        updateOfficialScreens
       }}
     >
       {children}

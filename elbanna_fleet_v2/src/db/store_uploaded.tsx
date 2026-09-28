@@ -410,7 +410,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
       }
       if (username.trim().toLowerCase() === 'admin' && password === savedAdminPass) {
-        const uObj: User = { username: 'admin', role: 'admin', name: 'أدمن النظام' };
+        const uObj: User = { username: 'admin', role: 'admin', name: 'أدمن النظام', allowedScreens: [] };
         setCurrentUser(uObj);
         localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
         return { success: true };
@@ -431,7 +431,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
       }
       if (username.trim().toLowerCase() === 'manager' && password === savedManagerPass) {
-        const uObj: User = { username: 'manager', role: 'manager', name: 'مدير عام الحركة' };
+        const uObj: User = { username: 'manager', role: 'manager', name: 'مدير عام الحركة', allowedScreens: [] };
         setCurrentUser(uObj);
         localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
         return { success: true };
@@ -471,7 +471,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             username: `supervisor_${officialId}`, 
             role: 'supervisor', 
             officialId, 
-            name: officialName 
+            name: officialName,
+            allowedScreens: []
           };
           setCurrentUser(uObj);
           localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));

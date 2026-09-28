@@ -151,7 +151,7 @@ export function LoginScreen() {
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder={role === 'admin' ? 'admin' : role === 'manager' ? 'manager' : role === 'movement_supervisor' ? 'movement_supervisor' : 'requests_agent'}
+                  placeholder={role === 'admin' ? db.adminUsername : role === 'manager' ? db.managerUsername : role === 'movement_supervisor' ? db.movementSupervisorUsername : db.requestsAgentUsername}
                   className="w-full text-right outline-none bg-slate-950 border border-slate-800 focus:border-emerald-500/80 focus:ring-1 focus:ring-emerald-500/30 text-slate-100 px-4 py-3 pr-10 rounded-xl text-xs md:text-sm font-bold transition-all placeholder:text-slate-650"
                   autoComplete="off"
                 />
@@ -209,19 +209,19 @@ export function LoginScreen() {
               <Lock className="w-3 h-3 text-emerald-400" />
             </h4>
             {role === 'admin' && (
-              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">admin</span> | كلمة المرور: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">admin</span></p>
+              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">{db.adminUsername}</span></p>
             )}
             {role === 'manager' && (
-              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">manager</span> | كلمة المرور: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">manager</span></p>
+              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">{db.managerUsername}</span></p>
             )}
             {role === 'supervisor' && (
-              <p>اختر اسم المشرف من القائمة | كلمة المرور الافتراضية للجميع: <span className="font-bold text-emerald-400 font-mono bg-slate-900 px-1 py-0.5 rounded border border-slate-800">123</span></p>
+              <p>اختر اسم المشرف من القائمة</p>
             )}
             {role === 'movement_supervisor' && (
-              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">movement_supervisor</span> | كلمة المرور: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">movement123</span></p>
+              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">{db.movementSupervisorUsername}</span></p>
             )}
             {role === 'requests_agent' && (
-              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">requests_agent</span> | كلمة المرور: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">requests123</span></p>
+              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">{db.requestsAgentUsername}</span></p>
             )}
           </div>
 

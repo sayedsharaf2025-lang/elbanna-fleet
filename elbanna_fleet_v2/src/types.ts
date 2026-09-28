@@ -5,9 +5,21 @@
 
 export interface User {
   username: string;
-  role: 'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent';
+  role: 'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent' | 'custom';
   officialId?: string; // ID of official if role is supervisor
+  systemUserId?: string; // ID in systemUsers list, if this session came from a general (non-supervisor) account
   name: string;
+  allowedScreens: string[]; // الشاشات المسموحة لهذه الجلسة تحديدًا — تُحسب وقت الدخول من المستخدم نفسه، مش من قسم/رتبة ثابتة
+}
+
+// حساب مستخدم عام في النظام (غير مرتبط بعهدة مالية) — اسم مستخدم وكلمة مرور وشاشات خاصة به يحددها الأدمن حرًا
+export interface SystemUser {
+  id: string; // UUID
+  username: string; // اسم المستخدم لتسجيل الدخول (فريد، قابل للتعديل بالكامل)
+  password: string; // كلمة المرور
+  display_name: string; // الاسم الظاهر بالنظام (مثال: "أحمد - مدير التقارير")
+  role_tag: 'admin' | 'manager' | 'movement_supervisor' | 'requests_agent' | 'custom'; // تصنيف مرجعي فقط لأغراض العرض، مايتحكمش في الشاشات
+  allowed_screens: string[]; // الشاشات المخصصة لهذا المستخدم تحديدًا — مش موروثة من قسم
 }
 
 export interface Driver {
@@ -26,6 +38,7 @@ export interface Official {
   cash_custody: number; // عهدة نقدي
   visa_custody: number; // عهدة فيزا
   password?: string; // كلمة المرور
+  allowed_screens?: string[]; // شاشات مخصصة لهذا المشرف تحديدًا؛ لو فاضية بيرجع لإعدادات رتبة "مشرف صرف" الافتراضية
 }
 
 export interface Car {
