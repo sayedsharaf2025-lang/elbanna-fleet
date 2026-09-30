@@ -18,6 +18,8 @@ import { SupabaseConsole } from './components/SupabaseConsole';
 import { LoginScreen } from './components/LoginScreen';
 import { TransportRequestsTab } from './components/TransportRequestsTab';
 import { RequestsTrackingTab } from './components/RequestsTrackingTab';
+import { TransportCostSettingsTab } from './components/TransportCostSettingsTab';
+import { RouteAccountingTab } from './components/RouteAccountingTab';
 import {
   LayoutDashboard,
   Truck,
@@ -37,7 +39,9 @@ import {
   Settings,
   Activity,
   Send,
-  ClipboardList
+  ClipboardList,
+  Fuel,
+  Route
 } from 'lucide-react';
 
 function DashboardLayout() {
@@ -56,7 +60,7 @@ function DashboardLayout() {
     return db.rolePermissions?.[user.role] || [];
   }, [db.currentUser, db.rolePermissions, db.officialCustomScreens]);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -107,6 +111,7 @@ function DashboardLayout() {
       items: [
         { id: 'users_settings' as const, label: 'حماية وإعدادات حسابات النظام', icon: Users },
         { id: 'fleet' as const, label: 'إعدادات السيارات والسائقين (Excel)', icon: Truck },
+        { id: 'transport_cost_settings' as const, label: 'إعدادات تكلفة خطوط السير', icon: Fuel },
       ]
     },
     {
@@ -123,6 +128,7 @@ function DashboardLayout() {
       items: [
         { id: 'deductions' as const, label: 'الخصومات الفردية والجماعية', icon: CreditCard },
         { id: 'cross_accounts' as const, label: 'أرشيف وحسابات السائقين (شهرية)', icon: FileSpreadsheet },
+        { id: 'route_accounting' as const, label: 'حساب خطوط السير', icon: Route },
       ]
     },
     { type: 'standalone' as const, id: 'reports' as const, label: 'شاشة التقارير والمطبوعات الموحدة', icon: FileText },
@@ -350,6 +356,8 @@ function DashboardLayout() {
             {activeTab === 'license_tracking' && <LicenseDashboardTab />}
             {activeTab === 'reports' && <ReportsTab />}
             {activeTab === 'users_settings' && <UsersSettingsTab />}
+            {activeTab === 'transport_cost_settings' && <TransportCostSettingsTab />}
+            {activeTab === 'route_accounting' && <RouteAccountingTab />}
           </div>
         </main>
 

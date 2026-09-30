@@ -124,6 +124,45 @@ export interface InvoiceAuditLog {
   new_value: string; // القيمة الجديدة بصيغة نصية
 }
 
+// بند تكلفة إضافي قابل للإضافة من الإعدادات (زي "دخان السائق" أو أي بند تاني)
+export interface CostItemType {
+  id: string;
+  name: string;
+}
+
+// سعر خط سير محدد (من - إلى) لمبلغ الدخان الافتراضي والمسافة — قابلين للتعديل يدويًا لكل طلب لاحقًا
+export interface RoutePriceEntry {
+  id: string;
+  from_location: string; // من
+  to_location: string; // إلى
+  smoke_amount: number; // مبلغ الدخان الافتراضي لهذا الخط
+  distance_km: number; // المسافة الافتراضية لهذا الخط بالكيلومتر
+}
+
+// بند تكلفة إضافي مُسجل فعليًا على طلب نقل معين (منسوخ من إعدادات بنود التكلفة وقت التسجيل)
+export interface TransportRequestExtraCost {
+  item_id: string;
+  item_name: string;
+  amount: number;
+}
+
+// تفاصيل تكلفة خط سير طلب نقل معين — المرجع request_id يربطها بـ TransportRequest
+export interface TransportRequestCost {
+  id: string;
+  request_id: string;
+  to_location: string; // إلى — نهاية خط السير
+  distance_km: number; // المسافة المقطوعة الفعلية (تُقترح من لائحة خطوط السير، وقابلة للتعديل)
+  smoke_amount: number; // الدخان (يُقترح من لائحة خطوط السير، وقابل للتعديل)
+  freight_amount: number; // النولون (يُحسب: المسافة × سعر نوع السيارة، وقابل للتعديل)
+  cards_amount: number; // كارتات (يدوي)
+  violations_amount: number; // مخالفات (يدوي)
+  tire_wash_amount: number; // غسيل كاوتش (يدوي)
+  maintenance_amount: number; // صيانة (يدوي)
+  extra_costs: TransportRequestExtraCost[]; // أي بنود إضافية أخرى من الإعدادات
+  updated_at: string;
+  updated_by?: string;
+}
+
 export interface TransportRequest {
   id: string; // UUID
   request_number: string; // رقم الطلب بصيغة سنة+شهر وأرقام تسلسلية من 4 خانات، مثال: 2608-0001
