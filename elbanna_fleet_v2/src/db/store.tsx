@@ -16,7 +16,10 @@ import {
   CustodyAccount, 
   CustodyMovement,
   User,
-  TransportRequest
+  TransportRequest,
+  CostItemType,
+  RoutePriceEntry,
+  TransportRequestCost
 } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import {
@@ -222,6 +225,22 @@ interface DbContextType {
   rolePermissions: Record<string, string[]>;
   updateRolePermissions: (role: string, screenIds: string[]) => void;
 
+  // إعدادات تكلفة خطوط السير — المرحلة 1 من تطوير نظام طلبات النقل
+  costItemTypes: CostItemType[];
+  addCostItemType: (name: string) => void;
+  deleteCostItemType: (id: string) => void;
+  vehicleFreightRates: Record<string, number>;
+  updateVehicleFreightRate: (carType: string, ratePerKm: number) => void;
+  deleteVehicleFreightRate: (carType: string) => void;
+  routePriceList: RoutePriceEntry[];
+  addRoutePrice: (fromLocation: string, toLocation: string, smokeAmount: number, distanceKm?: number) => void;
+  updateRoutePrice: (id: string, fromLocation: string, toLocation: string, smokeAmount: number, distanceKm?: number) => void;
+  deleteRoutePrice: (id: string) => void;
+  // بيانات تكلفة خط سير كل طلب نقل — المرحلة 2
+  transportRequestCosts: TransportRequestCost[];
+  upsertTransportRequestCost: (requestId: string, data: Omit<TransportRequestCost, 'id' | 'request_id' | 'updated_at' | 'updated_by'>) => TransportRequestCost;
+  deleteTransportRequestCost: (requestId: string) => void;
+
   // Local offline backup and restore features
   exportLocalBackup: () => string;
   importLocalBackup: (jsonData: string) => { success: boolean; message: string };
@@ -259,9 +278,9 @@ const DbContext = createContext<DbContextType | undefined>(undefined);
 // خريطة الصلاحيات الافتراضية للشاشات لكل رتبة — نفس القيم اللي كانت متثبتة (hardcoded) قبل كده
 // في App.tsx، وبقت دلوقتي قابلة للتعديل من شاشة "خريطة صلاحيات الشاشات"
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings'],
+  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings', 'transport_cost_settings', 'route_accounting'],
   supervisor: ['custody_licensing', 'license_tracking', 'reports'],
-  manager: ['reports'],
+  manager: ['reports', 'route_accounting'],
   movement_supervisor: ['requests_tracking'],
   requests_agent: ['transport_requests'],
 };
@@ -816,6 +835,132 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     });
   };
 
+  // ====== المرحلة 1 من تطوير نظام طلبات النقل: إعدادات تكلفة خطوط السير ======
+
+  // بنود التكلفة الإضافية القابلة للإضافة من الإعدادات (بجانب دخان السائق)
+  const [costItemTypes, setCostItemTypes] = useState<CostItemType[]>(() =>
+    loadSavedArray<CostItemType>('elbanna_cost_item_types', [])
+  );
+
+  const persistCostItemTypes = (next: CostItemType[]) => {
+    setCostItemTypes(next);
+    localStorage.setItem('elbanna_cost_item_types', JSON.stringify(next));
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'cost_item_types', value: JSON.stringify(next) })
+        .then(({ error }) => { if (error) console.warn("Supabase save cost_item_types error:", error); });
+    }
+  };
+
+  const addCostItemType = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (costItemTypes.some(i => i.name === trimmed)) return;
+    persistCostItemTypes([...costItemTypes, { id: generateId('cost_item'), name: trimmed }]);
+  };
+
+  const deleteCostItemType = (id: string) => {
+    persistCostItemTypes(costItemTypes.filter(i => i.id !== id));
+  };
+
+  // نولون السيارة لكل كيلومتر حسب نوع السيارة — المفتاح هو نوع السيارة (car_type)
+  const [vehicleFreightRates, setVehicleFreightRates] = useState<Record<string, number>>(() =>
+    loadSavedObject('elbanna_vehicle_freight_rates', {})
+  );
+
+  const updateVehicleFreightRate = (carType: string, ratePerKm: number) => {
+    setVehicleFreightRates(prev => {
+      const next = { ...prev, [carType]: ratePerKm };
+      localStorage.setItem('elbanna_vehicle_freight_rates', JSON.stringify(next));
+      const supabase = getSupabaseClient();
+      if (supabase && isCloudConnected) {
+        supabase.from('system_settings').upsert({ key: 'vehicle_freight_rates', value: JSON.stringify(next) })
+          .then(({ error }) => { if (error) console.warn("Supabase save vehicle_freight_rates error:", error); });
+      }
+      return next;
+    });
+  };
+
+  const deleteVehicleFreightRate = (carType: string) => {
+    setVehicleFreightRates(prev => {
+      const next = { ...prev };
+      delete next[carType];
+      localStorage.setItem('elbanna_vehicle_freight_rates', JSON.stringify(next));
+      const supabase = getSupabaseClient();
+      if (supabase && isCloudConnected) {
+        supabase.from('system_settings').upsert({ key: 'vehicle_freight_rates', value: JSON.stringify(next) })
+          .then(({ error }) => { if (error) console.warn("Supabase save vehicle_freight_rates error:", error); });
+      }
+      return next;
+    });
+  };
+
+  // لائحة خطوط السير (من - إلى - مبلغ الدخان الافتراضي)
+  const [routePriceList, setRoutePriceList] = useState<RoutePriceEntry[]>(() =>
+    loadSavedArray<RoutePriceEntry>('elbanna_route_price_list', [])
+  );
+
+  const persistRoutePriceList = (next: RoutePriceEntry[]) => {
+    setRoutePriceList(next);
+    localStorage.setItem('elbanna_route_price_list', JSON.stringify(next));
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'route_price_list', value: JSON.stringify(next) })
+        .then(({ error }) => { if (error) console.warn("Supabase save route_price_list error:", error); });
+    }
+  };
+
+  const addRoutePrice = (fromLocation: string, toLocation: string, smokeAmount: number, distanceKm: number = 0) => {
+    const from = fromLocation.trim();
+    const to = toLocation.trim();
+    if (!from || !to) return;
+    persistRoutePriceList([...routePriceList, { id: generateId('route'), from_location: from, to_location: to, smoke_amount: smokeAmount, distance_km: distanceKm }]);
+  };
+
+  const updateRoutePrice = (id: string, fromLocation: string, toLocation: string, smokeAmount: number, distanceKm: number = 0) => {
+    persistRoutePriceList(routePriceList.map(r => r.id === id ? { ...r, from_location: fromLocation.trim(), to_location: toLocation.trim(), smoke_amount: smokeAmount, distance_km: distanceKm } : r));
+  };
+
+  const deleteRoutePrice = (id: string) => {
+    persistRoutePriceList(routePriceList.filter(r => r.id !== id));
+  };
+
+  // ====== المرحلة 2: بيانات تكلفة خط سير كل طلب نقل (Route Accounting) ======
+  const [transportRequestCosts, setTransportRequestCosts] = useState<TransportRequestCost[]>(() =>
+    loadSavedArray<TransportRequestCost>('elbanna_transport_request_costs', [])
+  );
+
+  const persistTransportRequestCosts = (next: TransportRequestCost[]) => {
+    setTransportRequestCosts(next);
+    localStorage.setItem('elbanna_transport_request_costs', JSON.stringify(next));
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'transport_request_costs', value: JSON.stringify(next) })
+        .then(({ error }) => { if (error) console.warn("Supabase save transport_request_costs error:", error); });
+    }
+  };
+
+  // إضافة أو تحديث سجل تكلفة خط سير لطلب معين (سجل واحد لكل طلب — upsert حسب request_id)
+  const upsertTransportRequestCost = (requestId: string, data: Omit<TransportRequestCost, 'id' | 'request_id' | 'updated_at' | 'updated_by'>) => {
+    const existing = transportRequestCosts.find(c => c.request_id === requestId);
+    const record: TransportRequestCost = {
+      id: existing?.id || generateId('trc'),
+      request_id: requestId,
+      ...data,
+      updated_at: new Date().toISOString(),
+      updated_by: currentUser?.name || currentUser?.username,
+    };
+    const next = existing
+      ? transportRequestCosts.map(c => c.request_id === requestId ? record : c)
+      : [...transportRequestCosts, record];
+    persistTransportRequestCosts(next);
+    return record;
+  };
+
+  const deleteTransportRequestCost = (requestId: string) => {
+    persistTransportRequestCosts(transportRequestCosts.filter(c => c.request_id !== requestId));
+  };
+
   const [isRealtimeActive, setRealtimeActive] = useState(true);
   const [latencyMs, setLatencyMs] = useState(50);
 
@@ -1259,6 +1404,50 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }
               } catch (e) {
                 console.warn("Parse official_custom_screens JSON error", e);
+              }
+            }
+            if (row.key === 'cost_item_types' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (Array.isArray(parsed)) {
+                  setCostItemTypes(parsed);
+                  localStorage.setItem('elbanna_cost_item_types', JSON.stringify(parsed));
+                }
+              } catch (e) {
+                console.warn("Parse cost_item_types JSON error", e);
+              }
+            }
+            if (row.key === 'vehicle_freight_rates' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                  setVehicleFreightRates(parsed);
+                  localStorage.setItem('elbanna_vehicle_freight_rates', JSON.stringify(parsed));
+                }
+              } catch (e) {
+                console.warn("Parse vehicle_freight_rates JSON error", e);
+              }
+            }
+            if (row.key === 'route_price_list' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (Array.isArray(parsed)) {
+                  setRoutePriceList(parsed);
+                  localStorage.setItem('elbanna_route_price_list', JSON.stringify(parsed));
+                }
+              } catch (e) {
+                console.warn("Parse route_price_list JSON error", e);
+              }
+            }
+            if (row.key === 'transport_request_costs' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (Array.isArray(parsed)) {
+                  setTransportRequestCosts(parsed);
+                  localStorage.setItem('elbanna_transport_request_costs', JSON.stringify(parsed));
+                }
+              } catch (e) {
+                console.warn("Parse transport_request_costs JSON error", e);
               }
             }
             if (row.key === 'role_permissions' && row.value) {
@@ -1824,6 +2013,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   const deleteTransportRequest = (id: string) => {
     setTransportRequests(prev => prev.filter(r => r.id !== id));
+    // تنضيف سجل تكلفة خط السير المرتبط بالطلب المحذوف ده (لو موجود) عشان ميفضلش يتيم بلا فايدة
+    if (transportRequestCosts.some(c => c.request_id === id)) {
+      persistTransportRequestCosts(transportRequestCosts.filter(c => c.request_id !== id));
+    }
 
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
@@ -3701,6 +3894,19 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         deleteCompany,
         rolePermissions,
         updateRolePermissions,
+        costItemTypes,
+        addCostItemType,
+        deleteCostItemType,
+        vehicleFreightRates,
+        updateVehicleFreightRate,
+        deleteVehicleFreightRate,
+        routePriceList,
+        addRoutePrice,
+        updateRoutePrice,
+        deleteRoutePrice,
+        transportRequestCosts,
+        upsertTransportRequestCost,
+        deleteTransportRequestCost,
         resetToInitial,
         exportLocalBackup,
         importLocalBackup,
