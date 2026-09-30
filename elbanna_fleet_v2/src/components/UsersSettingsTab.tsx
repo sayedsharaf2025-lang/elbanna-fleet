@@ -24,12 +24,14 @@ const ALL_SCREENS: { id: string; label: string }[] = [
   { id: 'transport_requests', label: 'طلبات النقل' },
   { id: 'users_settings', label: 'حماية وإعدادات حسابات النظام' },
   { id: 'fleet', label: 'إعدادات السيارات والسائقين (Excel)' },
+  { id: 'transport_cost_settings', label: 'إعدادات تكلفة خطوط السير' },
   { id: 'violations', label: 'تسجيل المخالفات وتفادي التكرار' },
   { id: 'requests_tracking', label: 'متابعة الطلبات' },
   { id: 'license_tracking', label: 'متابعة وتحديث التراخيص المتقدمة' },
   { id: 'custody_licensing', label: 'فواتير تراخيص' },
   { id: 'deductions', label: 'الخصومات الفردية والجماعية' },
   { id: 'cross_accounts', label: 'أرشيف وحسابات السائقين (شهرية)' },
+  { id: 'route_accounting', label: 'حساب خطوط السير' },
   { id: 'reports', label: 'شاشة التقارير والمطبوعات الموحدة' },
 ];
 

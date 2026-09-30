@@ -262,6 +262,14 @@ export function RequestsTrackingTab() {
                     <div className="mt-2.5 pt-2.5 border-t border-slate-50 text-[11px] text-slate-600 font-bold flex flex-wrap gap-3">
                       <span>🚚 السيارة: {db.cars.find(c => c.id === r.assigned_car_id)?.car_number || '-'}</span>
                       <span>🧑‍✈️ السائق: {driverNameFor(r.assigned_driver_id)}</span>
+                      {(() => {
+                        const cost = db.transportRequestCosts.find(c => c.request_id === r.id);
+                        if (!cost) return <span className="text-slate-400 font-medium">💰 تكلفة النقلة: لسه ماتسجلتش</span>;
+                        const total = (cost.smoke_amount || 0) + (cost.freight_amount || 0) + (cost.cards_amount || 0) + (cost.violations_amount || 0)
+                          + (cost.tire_wash_amount || 0) + (cost.maintenance_amount || 0)
+                          + (cost.extra_costs || []).reduce((sum, i) => sum + (i.amount || 0), 0);
+                        return <span className="text-emerald-600">💰 تكلفة النقلة: {total.toLocaleString()} ج.م</span>;
+                      })()}
                     </div>
                   )}
                 </>
