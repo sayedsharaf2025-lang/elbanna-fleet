@@ -226,6 +226,8 @@ interface DbContextType {
   updateRolePermissions: (role: string, screenIds: string[]) => void;
 
   // إعدادات تكلفة خطوط السير — المرحلة 1 من تطوير نظام طلبات النقل
+  defaultGarageLocation: string;
+  updateDefaultGarageLocation: (location: string) => void;
   costItemTypes: CostItemType[];
   addCostItemType: (name: string) => void;
   deleteCostItemType: (id: string) => void;
@@ -249,6 +251,8 @@ interface DbContextType {
   // Authentication states
   currentUser: User | null;
   login: (username: string, role: 'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent', password?: string, officialId?: string) => Promise<{ success: boolean; error?: string }>;
+  // تسجيل دخول موحّد بدون اختيار قسم مقدمًا — اسم مستخدم وكلمة مرور بس، والنظام يتعرف على الحساب تلقائيًا
+  loginAuto: (identifier: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   adminPassword?: string;
   managerPassword?: string;
@@ -283,6 +287,27 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
   manager: ['reports', 'route_accounting'],
   movement_supervisor: ['requests_tracking'],
   requests_agent: ['transport_requests'],
+};
+
+// لو أضفنا شاشة جديدة في تحديث لاحق، صلاحيات الرتب المحفوظة فعليًا (محليًا أو سحابيًا) من قبل
+// التحديث ده مش هتعرف عنها حاجة، فالشاشة الجديدة مش هتظهر لحد — حتى لو الأدمن نفسه — رغم إنها
+// موجودة في DEFAULT_ROLE_PERMISSIONS. الدالة دي بتحل المشكلة: أي معرّف شاشة مش موجود خالص في أي
+// رتبة محفوظة (يعني شاشة جديدة تمامًا لسه محدش شافها) بنضيفه تلقائيًا لكل رتبة من المفروض
+// تشوفه حسب الإعداد الافتراضي — من غير ما نلمس أي شاشة الأدمن شايلها بنفسه قبل كده.
+const mergeNewDefaultScreens = (saved: Record<string, string[]>): Record<string, string[]> => {
+  const allSavedScreenIds = new Set(Object.values(saved).flat());
+  const result: Record<string, string[]> = { ...saved };
+  Object.entries(DEFAULT_ROLE_PERMISSIONS).forEach(([role, defaultScreens]) => {
+    if (!result[role]) {
+      result[role] = defaultScreens;
+      return;
+    }
+    const missingNewScreens = defaultScreens.filter(s => !allSavedScreenIds.has(s));
+    if (missingNewScreens.length > 0) {
+      result[role] = [...result[role], ...missingNewScreens];
+    }
+  });
+  return result;
 };
 
 export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -686,6 +711,34 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     return { success: false, error: 'نوع الحساب غير معروف' };
   };
 
+  // تسجيل دخول موحّد بدون اختيار قسم/رتبة مقدمًا — يكتب المستخدم اسمه وكلمة المرور بس،
+  // والنظام بيجرب يتعرف على نوع الحساب تلقائيًا (مشرف صرف بالاسم، أو أدمن/مدير/مشرف حركة/طلبات نقل باليوزرنيم)
+  const loginAuto = async (identifier: string, password: string): Promise<{ success: boolean; error?: string }> => {
+    const trimmed = identifier.trim();
+    if (!trimmed) {
+      return { success: false, error: 'يرجى إدخال اسم المستخدم' };
+    }
+    if (!password) {
+      return { success: false, error: 'يرجى إدخال كلمة المرور' };
+    }
+
+    // الأكثر شيوعًا: مشرف صرف بالاسم (مطابقة محلية سريعة، ثم تحقق من كلمة المرور)
+    const matchedOfficial = officials.find(o => o.name.trim().toLowerCase() === trimmed.toLowerCase());
+    if (matchedOfficial) {
+      const res = await login(trimmed, 'supervisor', password, matchedOfficial.id);
+      if (res.success) return res;
+    }
+
+    // باقي أنواع الحسابات: أدمن، مدير عام، مشرف حركة، مستخدم طلبات نقل
+    const rolesToTry: Array<'admin' | 'manager' | 'movement_supervisor' | 'requests_agent'> = ['admin', 'manager', 'movement_supervisor', 'requests_agent'];
+    for (const r of rolesToTry) {
+      const res = await login(trimmed, r, password);
+      if (res.success) return res;
+    }
+
+    return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
+  };
+
   const logout = () => {
     setCurrentUser(null);
     localStorage.removeItem('elbanna_current_user');
@@ -777,7 +830,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   // خريطة صلاحيات الشاشات القابلة للتعديل لكل رتبة (بدل الثابت المُقفل قديمًا في App.tsx)
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>(() =>
-    loadSavedObject('elbanna_role_permissions', DEFAULT_ROLE_PERMISSIONS)
+    mergeNewDefaultScreens(loadSavedObject('elbanna_role_permissions', DEFAULT_ROLE_PERMISSIONS))
   );
 
   const updateRolePermissions = (role: string, screenIds: string[]) => {
@@ -836,6 +889,27 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   // ====== المرحلة 1 من تطوير نظام طلبات النقل: إعدادات تكلفة خطوط السير ======
+
+  // نقطة البداية/النهاية الافتراضية لخط السير لو السيارة مالهاش جراج محدد في بياناتها
+  const [defaultGarageLocation, setDefaultGarageLocation] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('elbanna_default_garage_location');
+      return saved && saved.trim() ? saved : 'منيا القمح';
+    } catch {
+      return 'منيا القمح';
+    }
+  });
+
+  const updateDefaultGarageLocation = (location: string) => {
+    const trimmed = location.trim() || 'منيا القمح';
+    setDefaultGarageLocation(trimmed);
+    localStorage.setItem('elbanna_default_garage_location', trimmed);
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'default_garage_location', value: trimmed })
+        .then(({ error }) => { if (error) console.warn("Supabase save default_garage_location error:", error); });
+    }
+  };
 
   // بنود التكلفة الإضافية القابلة للإضافة من الإعدادات (بجانب دخان السائق)
   const [costItemTypes, setCostItemTypes] = useState<CostItemType[]>(() =>
@@ -1406,6 +1480,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 console.warn("Parse official_custom_screens JSON error", e);
               }
             }
+            if (row.key === 'default_garage_location' && row.value) {
+              setDefaultGarageLocation(row.value);
+              localStorage.setItem('elbanna_default_garage_location', row.value);
+            }
             if (row.key === 'cost_item_types' && row.value) {
               try {
                 const parsed = JSON.parse(row.value);
@@ -1454,8 +1532,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               try {
                 const parsed = JSON.parse(row.value);
                 if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                  setRolePermissions(prev => ({ ...prev, ...parsed }));
-                  localStorage.setItem('elbanna_role_permissions', JSON.stringify({ ...DEFAULT_ROLE_PERMISSIONS, ...parsed }));
+                  const merged = mergeNewDefaultScreens({ ...DEFAULT_ROLE_PERMISSIONS, ...parsed });
+                  setRolePermissions(merged);
+                  localStorage.setItem('elbanna_role_permissions', JSON.stringify(merged));
                 }
               } catch (e) {
                 console.warn("Parse role_permissions JSON error", e);
@@ -3894,6 +3973,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         deleteCompany,
         rolePermissions,
         updateRolePermissions,
+        defaultGarageLocation,
+        updateDefaultGarageLocation,
         costItemTypes,
         addCostItemType,
         deleteCostItemType,
@@ -3913,6 +3994,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         exportCloudBackup,
         currentUser,
         login,
+        loginAuto,
         logout,
         adminPassword,
         managerPassword,
