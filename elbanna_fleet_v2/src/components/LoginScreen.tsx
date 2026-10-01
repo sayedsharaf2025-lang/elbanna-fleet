@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
 import { useDb } from '../db/store';
-import { Lock, ShieldAlert, User, Key, Users, Truck, ClipboardList } from 'lucide-react';
+import { Lock, ShieldAlert, User, Key } from 'lucide-react';
 
 export function LoginScreen() {
   const db = useDb();
-  const [role, setRole] = useState<'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent'>('admin');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [selectedOfficialId, setSelectedOfficialId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -19,12 +17,7 @@ export function LoginScreen() {
     // Minor delay to show elegant transition
     setTimeout(async () => {
       try {
-        const res = await db.login(
-          role === 'supervisor' ? `supervisor_${selectedOfficialId}` : username,
-          role,
-          password,
-          role === 'supervisor' ? selectedOfficialId : undefined
-        );
+        const res = await db.loginAuto(username, password);
 
         setIsSubmitting(false);
         if (!res.success) {
@@ -55,71 +48,6 @@ export function LoginScreen() {
           <p className="text-xs text-emerald-400 font-semibold mt-1">البوابة الآمنة لإدارة الحركة والعهد المالية والتراخيص</p>
         </div>
 
-        {/* Account Types tab selectors */}
-        <div className="grid grid-cols-3 gap-2 bg-slate-950 p-1.5 rounded-2xl border border-slate-800 mb-6">
-          <button
-            type="button"
-            onClick={() => {
-              setRole('admin');
-              setError(null);
-            }}
-            className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all ${role === 'admin' ? 'bg-emerald-500 text-slate-950 font-extrabold shadow' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'}`}
-          >
-            أدمن النظام
-          </button>
-          
-          <button
-            type="button"
-            onClick={() => {
-              setRole('supervisor');
-              setError(null);
-              // auto select first official if available
-              if (db.officials.length > 0) {
-                setSelectedOfficialId(db.officials[0].id);
-              }
-            }}
-            className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all ${role === 'supervisor' ? 'bg-emerald-500 text-slate-950 font-extrabold shadow' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'}`}
-          >
-            مشرف صرف
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setRole('manager');
-              setError(null);
-            }}
-            className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all ${role === 'manager' ? 'bg-emerald-500 text-slate-950 font-extrabold shadow' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'}`}
-          >
-            المدير العام
-          </button>
-        </div>
-
-        {/* Movement / Requests roles tab selectors */}
-        <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1.5 rounded-2xl border border-slate-800 mb-6">
-          <button
-            type="button"
-            onClick={() => {
-              setRole('movement_supervisor');
-              setError(null);
-            }}
-            className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all flex items-center justify-center gap-1.5 ${role === 'movement_supervisor' ? 'bg-emerald-500 text-slate-950 font-extrabold shadow' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'}`}
-          >
-            <Truck className="w-3.5 h-3.5" /> مشرف الحركة
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setRole('requests_agent');
-              setError(null);
-            }}
-            className={`py-2 px-2 rounded-xl text-[11px] font-black transition-all flex items-center justify-center gap-1.5 ${role === 'requests_agent' ? 'bg-emerald-500 text-slate-950 font-extrabold shadow' : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900'}`}
-          >
-            <ClipboardList className="w-3.5 h-3.5" /> طلبات النقل
-          </button>
-        </div>
-
         {/* Cloud synchronization feedback banner */}
         {db.isCloudSyncing && (
           <div className="bg-emerald-550/15 border border-emerald-500/30 text-emerald-400 rounded-xl p-3 mb-5 flex items-center gap-2.5 text-xs animate-pulse">
@@ -138,51 +66,24 @@ export function LoginScreen() {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Dynamic Input: Username for admin and manager */}
-          {role !== 'supervisor' ? (
-            <div className="space-y-1.5">
-              <label className="block text-slate-400 text-xs font-bold mr-1">اسم المستخدم</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-500">
-                  <User className="w-4 h-4" />
-                </span>
-                <input
-                  type="text"
-                  required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder={role === 'admin' ? db.adminUsername : role === 'manager' ? db.managerUsername : role === 'movement_supervisor' ? db.movementSupervisorUsername : db.requestsAgentUsername}
-                  className="w-full text-right outline-none bg-slate-950 border border-slate-800 focus:border-emerald-500/80 focus:ring-1 focus:ring-emerald-500/30 text-slate-100 px-4 py-3 pr-10 rounded-xl text-xs md:text-sm font-bold transition-all placeholder:text-slate-650"
-                  autoComplete="off"
-                />
-              </div>
+          {/* Username — works for any account type (admin, manager, supervisor name, movement supervisor, requests agent) */}
+          <div className="space-y-1.5">
+            <label className="block text-slate-400 text-xs font-bold mr-1">اسم المستخدم</label>
+            <div className="relative">
+              <span className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-500">
+                <User className="w-4 h-4" />
+              </span>
+              <input
+                type="text"
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="اكتب اسم المستخدم..."
+                className="w-full text-right outline-none bg-slate-950 border border-slate-800 focus:border-emerald-500/80 focus:ring-1 focus:ring-emerald-500/30 text-slate-100 px-4 py-3 pr-10 rounded-xl text-xs md:text-sm font-bold transition-all placeholder:text-slate-650"
+                autoComplete="off"
+              />
             </div>
-          ) : (
-            /* Selected official supervisor for supervisor role */
-            <div className="space-y-1.5">
-              <label className="block text-slate-400 text-xs font-bold mr-1">اختر المسؤول المفوّض</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-500">
-                  <Users className="w-4 h-4" />
-                </span>
-                <select
-                  required
-                  value={selectedOfficialId}
-                  onChange={(e) => setSelectedOfficialId(e.target.value)}
-                  className="w-full text-right outline-none bg-slate-950 border border-slate-800 focus:border-emerald-500/80 focus:ring-1 focus:ring-emerald-500/30 text-slate-100 px-4 py-3 pr-10 rounded-xl text-xs md:text-sm font-bold transition-all appearance-none cursor-pointer"
-                >
-                  {db.officials.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
-                  {db.officials.length === 0 && (
-                    <option value="">-- لم يتم تعريف مسؤولين بعد --</option>
-                  )}
-                </select>
-              </div>
-            </div>
-          )}
+          </div>
 
           {/* Password field */}
           <div className="space-y-1.5">
@@ -200,29 +101,6 @@ export function LoginScreen() {
                 className="w-full text-right outline-none bg-slate-950 border border-slate-800 focus:border-emerald-500/80 focus:ring-1 focus:ring-emerald-500/30 text-slate-100 px-4 py-3 pr-10 rounded-xl text-xs md:text-sm font-bold transition-all placeholder:text-slate-700"
               />
             </div>
-          </div>
-
-          {/* Standard Credentials Guidance Panel */}
-          <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/60 text-[10px] text-slate-400 leading-relaxed text-right">
-            <h4 className="font-extrabold text-slate-300 flex items-center gap-1.5 text-[11px] mb-1 justify-end">
-              <span>بيانات الدخول الافتراضية للنظام للتجريب</span>
-              <Lock className="w-3 h-3 text-emerald-400" />
-            </h4>
-            {role === 'admin' && (
-              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">{db.adminUsername}</span></p>
-            )}
-            {role === 'manager' && (
-              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">{db.managerUsername}</span></p>
-            )}
-            {role === 'supervisor' && (
-              <p>اختر اسم المشرف من القائمة</p>
-            )}
-            {role === 'movement_supervisor' && (
-              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">{db.movementSupervisorUsername}</span></p>
-            )}
-            {role === 'requests_agent' && (
-              <p>اسم المستخدم: <span className="font-mono text-emerald-400 font-bold bg-slate-900 px-1 py-0.5 rounded border border-slate-800">{db.requestsAgentUsername}</span></p>
-            )}
           </div>
 
           {/* Action button */}

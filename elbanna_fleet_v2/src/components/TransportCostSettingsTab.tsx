@@ -14,6 +14,7 @@ import {
   CheckCircle,
   AlertTriangle,
   Pencil,
+  MapPin,
 } from 'lucide-react';
 
 // المرحلة 1 من تطوير نظام طلبات النقل: إعدادات تكلفة خطوط السير
@@ -28,6 +29,20 @@ export function TransportCostSettingsTab() {
     if (type === 'success') { setSuccessMsg(text); setErrorMsg(null); }
     else { setErrorMsg(text); setSuccessMsg(null); }
     setTimeout(() => { setSuccessMsg(null); setErrorMsg(null); }, 4000);
+  };
+
+  // ---- نقطة البداية/النهاية الافتراضية لخط السير ----
+  const [defaultGarageDraft, setDefaultGarageDraft] = useState(db.defaultGarageLocation);
+
+  const handleSaveDefaultGarage = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = defaultGarageDraft.trim();
+    if (!trimmed) {
+      showNotification('error', 'يرجى إدخال اسم نقطة البداية الافتراضية');
+      return;
+    }
+    db.updateDefaultGarageLocation(trimmed);
+    showNotification('success', `تم حفظ "${trimmed}" كنقطة بداية/نهاية افتراضية.`);
   };
 
   // ---- بنود التكلفة الإضافية ----
@@ -179,6 +194,28 @@ export function TransportCostSettingsTab() {
           <span className="font-extrabold">{errorMsg}</span>
         </div>
       )}
+
+      {/* نقطة البداية/النهاية الافتراضية لخط السير */}
+      <div className="bg-slate-900 border border-slate-850 rounded-2xl p-5 space-y-3">
+        <h3 className="text-sm font-black text-slate-250 flex items-center gap-2">
+          <MapPin className="w-4 h-4 text-amber-400" />
+          <span>نقطة البداية/النهاية الافتراضية لخط السير</span>
+        </h3>
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          بتُستخدم كنقطة بداية لأول نقلة في اليوم لأي سيارة مالهاش "جراج" محدد في بياناتها، وكنقطة رجوع تلقائية لآخر نقلة في اليوم.
+        </p>
+        <form onSubmit={handleSaveDefaultGarage} className="flex gap-2 max-w-md">
+          <input
+            type="text"
+            value={defaultGarageDraft}
+            onChange={(e) => setDefaultGarageDraft(e.target.value)}
+            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-amber-500"
+          />
+          <button type="submit" className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2 rounded-lg text-xs font-black">
+            حفظ
+          </button>
+        </form>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 

@@ -51,6 +51,7 @@ export const CarsDriversTab: React.FC = () => {
   const [carBrand, setCarBrand] = useState('');
   const [carType, setCarType] = useState('');
   const [trafficOffice, setTrafficOffice] = useState('');
+  const [garageLocation, setGarageLocation] = useState('');
 
   // New Driver Form State
   const [driverCode, setDriverCode] = useState('');
@@ -85,7 +86,8 @@ export const CarsDriversTab: React.FC = () => {
       model: carModel,
       brand: carBrand,
       car_type: carType,
-      traffic_office: trafficOffice
+      traffic_office: trafficOffice,
+      garage_location: garageLocation
     };
 
     // Automatically save new companies to suggestions list
@@ -114,6 +116,7 @@ export const CarsDriversTab: React.FC = () => {
     setCarBrand('');
     setCarType('');
     setTrafficOffice('');
+    setGarageLocation('');
     setOwnerCompany('');
   };
 
@@ -132,6 +135,7 @@ export const CarsDriversTab: React.FC = () => {
     setCarBrand(car.brand || '');
     setCarType(car.car_type || '');
     setTrafficOffice(car.traffic_office || '');
+    setGarageLocation(car.garage_location || '');
   };
 
   // Drivers Save / Edit Callback
@@ -951,6 +955,18 @@ export const CarsDriversTab: React.FC = () => {
                   value={trafficOffice}
                   onChange={(e) => setTrafficOffice(e.target.value)}
                 />
+              </div>
+
+              <div>
+                <label className="block text-slate-500 font-bold mb-1">مكان جراج/موقف السيارة</label>
+                <input
+                  type="text"
+                  placeholder="لو فاضي هيتحسب منيا القمح (الإعداد الافتراضي)"
+                  className="w-full p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 text-slate-800 font-medium"
+                  value={garageLocation}
+                  onChange={(e) => setGarageLocation(e.target.value)}
+                />
+                <p className="text-[10px] text-slate-400 mt-1">نقطة بداية خط السير لأول نقلة في اليوم، ونقطة النهاية التلقائية لآخر نقلة.</p>
               </div>
 
               <div>

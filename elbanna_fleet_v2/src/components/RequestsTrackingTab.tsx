@@ -265,7 +265,8 @@ export function RequestsTrackingTab() {
                       {(() => {
                         const cost = db.transportRequestCosts.find(c => c.request_id === r.id);
                         if (!cost) return <span className="text-slate-400 font-medium">💰 تكلفة النقلة: لسه ماتسجلتش</span>;
-                        const total = (cost.smoke_amount || 0) + (cost.freight_amount || 0) + (cost.cards_amount || 0) + (cost.violations_amount || 0)
+                        const legsCost = (cost.legs || []).reduce((sum, l) => sum + (l.smoke_amount || 0) + (l.freight_amount || 0), 0);
+                        const total = legsCost + (cost.cards_amount || 0) + (cost.violations_amount || 0)
                           + (cost.tire_wash_amount || 0) + (cost.maintenance_amount || 0)
                           + (cost.extra_costs || []).reduce((sum, i) => sum + (i.amount || 0), 0);
                         return <span className="text-emerald-600">💰 تكلفة النقلة: {total.toLocaleString()} ج.م</span>;
