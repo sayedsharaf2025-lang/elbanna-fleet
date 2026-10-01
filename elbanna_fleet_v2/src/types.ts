@@ -55,6 +55,7 @@ export interface Car {
   model?: string; // الموديل
   brand?: string; // ماركة السيارة
   car_type?: string; // نوع السيارة
+  garage_location?: string; // مكان جراج/موقف السيارة — نقطة بداية خط السير الافتراضية لو مفيش رحلة سابقة لنفس اليوم
   traffic_office?: string; // جهة المرور
   license_total_cost?: number; // إجمالي مصروف الترخيص المتراكم
 }
@@ -146,14 +147,23 @@ export interface TransportRequestExtraCost {
   amount: number;
 }
 
+// محطة واحدة من محطات خط سير الرحلة (من → إلى)، بتفاصيل المسافة والدخان والنولون الخاصة بيها
+export interface TransportRouteLeg {
+  id: string;
+  from_location: string;
+  to_location: string;
+  distance_km: number; // تُقترح من لائحة خطوط السير، وقابلة للتعديل
+  smoke_amount: number; // يُقترح من لائحة خطوط السير، وقابل للتعديل
+  freight_amount: number; // يُحسب: المسافة × سعر نوع السيارة، وقابل للتعديل
+}
+
 // تفاصيل تكلفة خط سير طلب نقل معين — المرجع request_id يربطها بـ TransportRequest
+// الرحلة ممكن تكون أكتر من محطة (من البداية للمزرعة، ومن المزرعة لوجهة تانية، وهكذا)
 export interface TransportRequestCost {
   id: string;
   request_id: string;
-  to_location: string; // إلى — نهاية خط السير
-  distance_km: number; // المسافة المقطوعة الفعلية (تُقترح من لائحة خطوط السير، وقابلة للتعديل)
-  smoke_amount: number; // الدخان (يُقترح من لائحة خطوط السير، وقابل للتعديل)
-  freight_amount: number; // النولون (يُحسب: المسافة × سعر نوع السيارة، وقابل للتعديل)
+  legs: TransportRouteLeg[]; // محطات خط السير بالترتيب (أول محطة: من نقطة البداية إلى مزرعة الطالب)
+  auto_return: boolean; // true = آخر محطة فيها رجوع تلقائي لنقطة البداية/الجراج؛ false = في نقلة تانية بعدها لنفس السيارة نفس اليوم فمفيش رجوع
   cards_amount: number; // كارتات (يدوي)
   violations_amount: number; // مخالفات (يدوي)
   tire_wash_amount: number; // غسيل كاوتش (يدوي)
