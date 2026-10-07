@@ -19,7 +19,13 @@ import {
   TransportRequest,
   CostItemType,
   RoutePriceEntry,
-  TransportRequestCost
+  TransportRequestCost,
+  CarDailyCost,
+  SystemUser,
+  MaintenanceRequest,
+  MaintenancePartItem,
+  MaintenanceInvoice,
+  MaintenanceInvoiceItem
 } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import {
@@ -119,6 +125,7 @@ interface DbContextType {
   addTransportRequest: (data: {
     requester_name: string;
     farm_name: string;
+    destinations: string[];
     car_type: string;
     cargo_description: string;
     request_date: string;
@@ -126,7 +133,26 @@ interface DbContextType {
   updateTransportRequest: (id: string, updatedFields: Partial<TransportRequest>) => void;
   deleteTransportRequest: (id: string) => void;
   respondTransportRequestWithCar: (requestId: string, carId: string) => { success: boolean; error?: string };
-  markTransportRequestDelivered: (requestId: string) => void;
+  markTransportRequestDelivered: (requestId: string, executionDate?: string) => void;
+
+  // قسم الصيانة — مبني فوق قاعدة بيانات السيارات الحالية (car_id = Car.id)
+  maintenanceRequests: MaintenanceRequest[];
+  maintenanceInvoices: MaintenanceInvoice[];
+  addMaintenanceRequest: (data: {
+    car_id: string;
+    fault_description: string;
+    workshop_type: 'company' | 'external';
+    workshop_name?: string;
+    request_date: string;
+  }) => MaintenanceRequest;
+  updateMaintenanceRequest: (id: string, updatedFields: Partial<MaintenanceRequest>) => void;
+  deleteMaintenanceRequest: (id: string) => void;
+  addMaintenancePart: (requestId: string, part: { name: string; source: 'company_stock' | 'external_workshop'; quantity: number }) => void;
+  deleteMaintenancePart: (requestId: string, partId: string) => void;
+  openMaintenanceInvoice: (requestId: string) => MaintenanceInvoice | null;
+  updateMaintenanceInvoice: (id: string, updatedFields: Partial<MaintenanceInvoice>) => void;
+  addMaintenanceInvoiceItem: (invoiceId: string, item: { description: string; item_type: 'parts' | 'labor'; source?: 'company_stock' | 'external_workshop'; quantity: number; unit_price: number; total: number }) => void;
+  deleteMaintenanceInvoiceItem: (invoiceId: string, itemId: string) => void;
 
   // Real-time status simulation / State settings
   isRealtimeActive: boolean;
@@ -225,6 +251,12 @@ interface DbContextType {
   rolePermissions: Record<string, string[]>;
   updateRolePermissions: (role: string, screenIds: string[]) => void;
 
+  // نظام المستخدمين الموحّد — شاشة واحدة، كل مستخدم بشاشاته الخاصة من غير ارتباط بقسم/رتبة
+  systemUsers: SystemUser[];
+  addSystemUser: (username: string, password: string, displayName: string, allowedScreens: string[]) => { success: boolean; error?: string; user?: SystemUser };
+  updateSystemUser: (id: string, updates: { username?: string; password?: string; display_name?: string; allowed_screens?: string[] }) => { success: boolean; error?: string; gainedCustodyAccount?: boolean };
+  deleteSystemUser: (id: string) => void;
+
   // إعدادات تكلفة خطوط السير — المرحلة 1 من تطوير نظام طلبات النقل
   defaultGarageLocation: string;
   updateDefaultGarageLocation: (location: string) => void;
@@ -242,6 +274,10 @@ interface DbContextType {
   transportRequestCosts: TransportRequestCost[];
   upsertTransportRequestCost: (requestId: string, data: Omit<TransportRequestCost, 'id' | 'request_id' | 'updated_at' | 'updated_by'>) => TransportRequestCost;
   deleteTransportRequestCost: (requestId: string) => void;
+  // مصاريف وأرباح السيارات اليومية (مسافة اليوم الكلية، النولون، كارتات، مخالفات، غسيل كاوتش، صيانة)
+  carDailyCosts: CarDailyCost[];
+  upsertCarDailyCost: (carId: string, date: string, data: Omit<CarDailyCost, 'id' | 'car_id' | 'date' | 'updated_at' | 'updated_by'>) => CarDailyCost;
+  deleteCarDailyCost: (carId: string, date: string) => void;
 
   // Local offline backup and restore features
   exportLocalBackup: () => string;
@@ -282,9 +318,9 @@ const DbContext = createContext<DbContextType | undefined>(undefined);
 // خريطة الصلاحيات الافتراضية للشاشات لكل رتبة — نفس القيم اللي كانت متثبتة (hardcoded) قبل كده
 // في App.tsx، وبقت دلوقتي قابلة للتعديل من شاشة "خريطة صلاحيات الشاشات"
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings', 'transport_cost_settings', 'route_accounting'],
+  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings', 'transport_cost_settings', 'route_accounting', 'car_daily_costs', 'maintenance'],
   supervisor: ['custody_licensing', 'license_tracking', 'reports'],
-  manager: ['reports', 'route_accounting'],
+  manager: ['reports', 'route_accounting', 'car_daily_costs'],
   movement_supervisor: ['requests_tracking'],
   requests_agent: ['transport_requests'],
 };
@@ -722,18 +758,20 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return { success: false, error: 'يرجى إدخال كلمة المرور' };
     }
 
-    // الأكثر شيوعًا: مشرف صرف بالاسم (مطابقة محلية سريعة، ثم تحقق من كلمة المرور)
-    const matchedOfficial = officials.find(o => o.name.trim().toLowerCase() === trimmed.toLowerCase());
-    if (matchedOfficial) {
-      const res = await login(trimmed, 'supervisor', password, matchedOfficial.id);
-      if (res.success) return res;
-    }
-
-    // باقي أنواع الحسابات: أدمن، مدير عام، مشرف حركة، مستخدم طلبات نقل
-    const rolesToTry: Array<'admin' | 'manager' | 'movement_supervisor' | 'requests_agent'> = ['admin', 'manager', 'movement_supervisor', 'requests_agent'];
-    for (const r of rolesToTry) {
-      const res = await login(trimmed, r, password);
-      if (res.success) return res;
+    // المصدر الوحيد للدخول دلوقتي: جدول المستخدمين الموحّد — مفيش ارتباط بقسم أو رتبة ثابتة
+    const matched = systemUsers.find(u => u.username.trim().toLowerCase() === trimmed.toLowerCase() && u.password === password);
+    if (matched) {
+      const uObj: User = {
+        username: matched.username,
+        role: matched.linked_official_id ? 'supervisor' : (matched.role_tag === 'custom' ? 'custom' : matched.role_tag),
+        officialId: matched.linked_official_id,
+        systemUserId: matched.id,
+        name: matched.display_name,
+        allowedScreens: matched.allowed_screens,
+      };
+      setCurrentUser(uObj);
+      localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
+      return { success: true };
     }
 
     return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
@@ -824,6 +862,14 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     loadSavedArray('elbanna_transport_requests', [])
   );
 
+  // ====== قسم الصيانة — مبني فوق قاعدة بيانات السيارات الحالية (car_id = Car.id)، بدون أي تكرار لبياناتها ======
+  const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>(() =>
+    loadSavedArray('elbanna_maintenance_requests', [])
+  );
+  const [maintenanceInvoices, setMaintenanceInvoices] = useState<MaintenanceInvoice[]>(() =>
+    loadSavedArray('elbanna_maintenance_invoices', [])
+  );
+
   const [farms, setFarms] = useState<string[]>(() =>
     loadSavedArray('elbanna_farms', [])
   );
@@ -870,6 +916,146 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }
       return next;
     });
+  };
+
+  // ====== نظام المستخدمين الموحّد — شاشة واحدة، من غير ارتباط بقسم/رتبة ثابتة ======
+  // أول مرة يتحمّل فيها النظام بعد التحديث ده، مفيش "systemUsers" محفوظة لسه، فبنعمل ترحيل
+  // تلقائي لمرة واحدة: كل حساب موجود فعليًا (أدمن/مدير/مشرف حركة/مستخدم طلبات نقل + كل مشرف
+  // صرف) بيتحول لسطر في الجدول الموحد بنفس اليوزر/الباسورد/الشاشات، من غير ما حد يفقد دخوله.
+  const buildMigratedSystemUsers = (): SystemUser[] => {
+    const fixedAccounts: SystemUser[] = [
+      { id: 'sysuser_admin', username: adminUsername, password: adminPassword, display_name: 'أدمن النظام', role_tag: 'admin', allowed_screens: rolePermissions.admin || DEFAULT_ROLE_PERMISSIONS.admin },
+      { id: 'sysuser_manager', username: managerUsername, password: managerPassword, display_name: 'المدير العام', role_tag: 'manager', allowed_screens: rolePermissions.manager || DEFAULT_ROLE_PERMISSIONS.manager },
+      { id: 'sysuser_movement_supervisor', username: movementSupervisorUsername, password: movementSupervisorPassword, display_name: 'مشرف الحركة', role_tag: 'movement_supervisor', allowed_screens: rolePermissions.movement_supervisor || DEFAULT_ROLE_PERMISSIONS.movement_supervisor },
+      { id: 'sysuser_requests_agent', username: requestsAgentUsername, password: requestsAgentPassword, display_name: 'مستخدم طلبات النقل', role_tag: 'requests_agent', allowed_screens: rolePermissions.requests_agent || DEFAULT_ROLE_PERMISSIONS.requests_agent },
+    ];
+    const officialAccounts: SystemUser[] = officials.map(o => ({
+      id: `sysuser_official_${o.id}`,
+      username: o.name,
+      password: o.password || '123',
+      display_name: o.name,
+      role_tag: 'custom',
+      allowed_screens: officialCustomScreens[o.id] || rolePermissions.supervisor || DEFAULT_ROLE_PERMISSIONS.supervisor,
+      linked_official_id: o.id,
+    }));
+    return [...fixedAccounts, ...officialAccounts];
+  };
+
+  // أي شاشة جديدة تتضاف للنظام لاحقًا (زي قسم الصيانة) لازم الأدمن يشوفها تلقائيًا من غير ما
+  // يحتاج يروح يفعّلها يدوي بنفسه من شاشة المستخدمين — فبندمج أي شاشة افتراضية لأدمن لسه مش
+  // موجودة في أي حساب محفوظ خالص (يعني شاشة جديدة فعلًا) على حساب الأدمن تحديدًا، من غير ما
+  // نلمس تخصيصات أي مستخدم تاني عمله الأدمن بنفسه.
+  const mergeNewScreensIntoAdminUser = (users: SystemUser[]): SystemUser[] => {
+    const allKnownScreenIds = new Set(users.flatMap(u => u.allowed_screens));
+    const missingForAdmin = DEFAULT_ROLE_PERMISSIONS.admin.filter(s => !allKnownScreenIds.has(s));
+    if (missingForAdmin.length === 0) return users;
+    return users.map(u => u.role_tag === 'admin'
+      ? { ...u, allowed_screens: [...u.allowed_screens, ...missingForAdmin] }
+      : u
+    );
+  };
+
+  const [systemUsers, setSystemUsers] = useState<SystemUser[]>(() => {
+    const saved = loadSavedArray<SystemUser>('elbanna_system_users', []);
+    if (saved.length > 0) return mergeNewScreensIntoAdminUser(saved);
+    return buildMigratedSystemUsers();
+  });
+
+  const persistSystemUsers = (next: SystemUser[]) => {
+    setSystemUsers(next);
+    localStorage.setItem('elbanna_system_users', JSON.stringify(next));
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'system_users', value: JSON.stringify(next) })
+        .then(({ error }) => { if (error) console.warn("Supabase save system_users error:", error); });
+    }
+  };
+
+  const addSystemUser = (username: string, password: string, displayName: string, allowedScreens: string[]) => {
+    const trimmedUser = username.trim();
+    const trimmedName = displayName.trim() || trimmedUser;
+    if (!trimmedUser || !password) return { success: false, error: 'يرجى إدخال اسم مستخدم وكلمة مرور' };
+    if (systemUsers.some(u => u.username.trim().toLowerCase() === trimmedUser.toLowerCase())) {
+      return { success: false, error: 'اسم المستخدم ده مستخدم بالفعل' };
+    }
+    const newUser: SystemUser = {
+      id: generateId('sysuser'),
+      username: trimmedUser,
+      password,
+      display_name: trimmedName,
+      role_tag: 'custom',
+      allowed_screens: allowedScreens,
+    };
+    let finalUser = newUser;
+    if (allowedScreens.includes('custody_licensing')) {
+      const newOfficial = addOfficial({ name: trimmedName, cash_custody: 0, visa_custody: 0, password });
+      finalUser = { ...newUser, linked_official_id: newOfficial.id };
+    }
+    persistSystemUsers([...systemUsers, finalUser]);
+    return { success: true, user: finalUser };
+  };
+
+  // تحديث بيانات مستخدم (اسم/يوزر/باسورد/شاشات) — ولو ضاف صلاحية "فواتير تراخيص" لأول مرة
+  // بيتعمله تلقائيًا حساب عهدة (Official) مربوط بيه عشان يقدر يستخدم الشاشة دي فعليًا
+  const updateSystemUser = (id: string, updates: { username?: string; password?: string; display_name?: string; allowed_screens?: string[] }) => {
+    const target = systemUsers.find(u => u.id === id);
+    if (!target) return { success: false, error: 'المستخدم غير موجود' };
+    if (updates.username) {
+      const trimmed = updates.username.trim();
+      if (systemUsers.some(u => u.id !== id && u.username.trim().toLowerCase() === trimmed.toLowerCase())) {
+        return { success: false, error: 'اسم المستخدم ده مستخدم بالفعل' };
+      }
+    }
+
+    let linkedOfficialId = target.linked_official_id;
+    const gainedLicensingAccess = updates.allowed_screens
+      && updates.allowed_screens.includes('custody_licensing')
+      && !target.allowed_screens.includes('custody_licensing');
+
+    if (gainedLicensingAccess && !linkedOfficialId) {
+      const newOfficial = addOfficial({
+        name: updates.display_name?.trim() || target.display_name,
+        cash_custody: 0,
+        visa_custody: 0,
+        password: updates.password || target.password,
+      });
+      linkedOfficialId = newOfficial.id;
+    }
+
+    // لو عنده حساب عهدة مربوط بالفعل، نخلي اسمه/باسوورده في حساب العهدة متزامن مع التعديل هنا
+    if (linkedOfficialId && (updates.display_name || updates.password)) {
+      if (updates.display_name && updates.display_name.trim() !== target.display_name) {
+        updateOfficialName(linkedOfficialId, updates.display_name.trim());
+      }
+      if (updates.password) {
+        updateOfficialPassword(linkedOfficialId, updates.password);
+      }
+    }
+
+    const updatedUser: SystemUser = {
+      ...target,
+      username: updates.username?.trim() || target.username,
+      password: updates.password || target.password,
+      display_name: updates.display_name?.trim() || target.display_name,
+      allowed_screens: updates.allowed_screens || target.allowed_screens,
+      linked_official_id: linkedOfficialId,
+    };
+    persistSystemUsers(systemUsers.map(u => u.id === id ? updatedUser : u));
+
+    // لو المستخدم ده هو نفسه الداخل دلوقتي، نحدّث جلسته النشطة فورًا من غير ما يحتاج يعمل تسجيل خروج
+    if (currentUser?.systemUserId === id) {
+      const updatedSession = { ...currentUser, name: updatedUser.display_name, username: updatedUser.username, allowedScreens: updatedUser.allowed_screens, officialId: linkedOfficialId };
+      setCurrentUser(updatedSession);
+      localStorage.setItem('elbanna_current_user', JSON.stringify(updatedSession));
+    }
+
+    return { success: true, gainedCustodyAccount: gainedLicensingAccess && !target.linked_official_id };
+  };
+
+  // حذف مستخدم من الجدول الموحد فقط — حساب العهدة المالية المربوط (لو موجود) بيفضل زي ما هو
+  // ومايتمسحش تلقائي، حفاظًا على البيانات المالية؛ يتحذف بشكل منفصل ومقصود لو لزم الأمر
+  const deleteSystemUser = (id: string) => {
+    persistSystemUsers(systemUsers.filter(u => u.id !== id));
   };
 
   const addFarmIfNew = (farmName: string) => {
@@ -1035,6 +1221,46 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     persistTransportRequestCosts(transportRequestCosts.filter(c => c.request_id !== requestId));
   };
 
+  // ====== مصاريف وأرباح السيارات اليومية (CarDailyCost): النولون، كارتات، مخالفات، غسيل كاوتش،
+  // صيانة — كل ده مربوط بالسيارة + تاريخ التنفيذ (مش بطلب بعينه)، عشان يدعم حساب ربحية السيارة ======
+  const [carDailyCosts, setCarDailyCosts] = useState<CarDailyCost[]>(() =>
+    loadSavedArray<CarDailyCost>('elbanna_car_daily_costs', [])
+  );
+
+  const persistCarDailyCosts = (next: CarDailyCost[]) => {
+    setCarDailyCosts(next);
+    localStorage.setItem('elbanna_car_daily_costs', JSON.stringify(next));
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'car_daily_costs', value: JSON.stringify(next) })
+        .then(({ error }) => { if (error) console.warn("Supabase save car_daily_costs error:", error); });
+    }
+  };
+
+  // إضافة أو تحديث سجل مصاريف يوم معين لسيارة معينة (سجل واحد لكل سيارة+تاريخ — upsert)
+  const upsertCarDailyCost = (carId: string, date: string, data: Omit<CarDailyCost, 'id' | 'car_id' | 'date' | 'updated_at' | 'updated_by'>) => {
+    const normalizedDate = normalizeDateToYmd(date);
+    const existing = carDailyCosts.find(c => c.car_id === carId && c.date === normalizedDate);
+    const record: CarDailyCost = {
+      id: existing?.id || generateId('cdc'),
+      car_id: carId,
+      date: normalizedDate,
+      ...data,
+      updated_at: new Date().toISOString(),
+      updated_by: currentUser?.name || currentUser?.username,
+    };
+    const next = existing
+      ? carDailyCosts.map(c => (c.car_id === carId && c.date === normalizedDate) ? record : c)
+      : [...carDailyCosts, record];
+    persistCarDailyCosts(next);
+    return record;
+  };
+
+  const deleteCarDailyCost = (carId: string, date: string) => {
+    const normalizedDate = normalizeDateToYmd(date);
+    persistCarDailyCosts(carDailyCosts.filter(c => !(c.car_id === carId && c.date === normalizedDate)));
+  };
+
   const [isRealtimeActive, setRealtimeActive] = useState(true);
   const [latencyMs, setLatencyMs] = useState(50);
 
@@ -1171,7 +1397,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         resMovements,
         resCustodyAccs,
         resCustodyMovs,
-        resTransportRequests
+        resTransportRequests,
+        resMaintenanceRequests,
+        resMaintenanceInvoices
       ] = await Promise.all([
         supabase.from('drivers').select('*'),
         supabase.from('officials').select('*'),
@@ -1183,7 +1411,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         supabase.from('driver_account_movements').select('*').order('date', { ascending: false }),
         supabase.from('custody_accounts').select('*'),
         supabase.from('custody_movements').select('*').order('date', { ascending: false }),
-        supabase.from('transport_requests').select('*').order('request_number', { ascending: false })
+        supabase.from('transport_requests').select('*').order('request_number', { ascending: false }),
+        supabase.from('maintenance_requests').select('*').order('request_number', { ascending: false }),
+        supabase.from('maintenance_invoices').select('*').order('invoice_number', { ascending: false })
       ]);
 
       let errorOccurred = false;
@@ -1233,6 +1463,15 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       if (resTransportRequests.error && !resTransportRequests.error.message?.includes("does not exist") && !resTransportRequests.error.message?.includes("schema cache")) {
         errorOccurred = true;
         detailedErrors.push(`transport_requests: ${resTransportRequests.error.message} (code: ${resTransportRequests.error.code})`);
+      }
+      // جداول الصيانة جديدة وقد لا تكون منشأة بعد، فلا نمنع باقي المزامنة بسببها
+      if (resMaintenanceRequests.error && !resMaintenanceRequests.error.message?.includes("does not exist") && !resMaintenanceRequests.error.message?.includes("schema cache")) {
+        errorOccurred = true;
+        detailedErrors.push(`maintenance_requests: ${resMaintenanceRequests.error.message} (code: ${resMaintenanceRequests.error.code})`);
+      }
+      if (resMaintenanceInvoices.error && !resMaintenanceInvoices.error.message?.includes("does not exist") && !resMaintenanceInvoices.error.message?.includes("schema cache")) {
+        errorOccurred = true;
+        detailedErrors.push(`maintenance_invoices: ${resMaintenanceInvoices.error.message} (code: ${resMaintenanceInvoices.error.code})`);
       }
 
       if (errorOccurred) {
@@ -1398,6 +1637,18 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const localOnly = transportRequests.filter(r => !cloudIds.has(r.id));
         setTransportRequests([...cloudRequests, ...localOnly]);
       }
+      if (resMaintenanceRequests.data) {
+        const cloudReqs = resMaintenanceRequests.data;
+        const cloudIds = new Set(cloudReqs.map((r: any) => r.id));
+        const localOnly = maintenanceRequests.filter(r => !cloudIds.has(r.id));
+        setMaintenanceRequests([...cloudReqs, ...localOnly]);
+      }
+      if (resMaintenanceInvoices.data) {
+        const cloudInvs = resMaintenanceInvoices.data;
+        const cloudIds = new Set(cloudInvs.map((i: any) => i.id));
+        const localOnly = maintenanceInvoices.filter(i => !cloudIds.has(i.id));
+        setMaintenanceInvoices([...cloudInvs, ...localOnly]);
+      }
 
       // Safe separate fetch for system settings / admin & manager passwords so it doesn't block the core tables
       try {
@@ -1526,6 +1777,29 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }
               } catch (e) {
                 console.warn("Parse transport_request_costs JSON error", e);
+              }
+            }
+            if (row.key === 'car_daily_costs' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (Array.isArray(parsed)) {
+                  setCarDailyCosts(parsed);
+                  localStorage.setItem('elbanna_car_daily_costs', JSON.stringify(parsed));
+                }
+              } catch (e) {
+                console.warn("Parse car_daily_costs JSON error", e);
+              }
+            }
+            if (row.key === 'system_users' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  const merged = mergeNewScreensIntoAdminUser(parsed);
+                  setSystemUsers(merged);
+                  localStorage.setItem('elbanna_system_users', JSON.stringify(merged));
+                }
+              } catch (e) {
+                console.warn("Parse system_users JSON error", e);
               }
             }
             if (row.key === 'role_permissions' && row.value) {
@@ -2051,6 +2325,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const addTransportRequest = (data: {
     requester_name: string;
     farm_name: string;
+    destinations: string[];
     car_type: string;
     cargo_description: string;
     request_date: string;
@@ -2061,6 +2336,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       request_number: generateRequestNumber(),
       requester_name: data.requester_name.trim(),
       farm_name: data.farm_name.trim(),
+      destinations: (data.destinations || []).map(d => d.trim()).filter(Boolean),
       car_type: data.car_type.trim(),
       cargo_description: data.cargo_description.trim(),
       request_date: normalizeDateToYmd(data.request_date),
@@ -2069,6 +2345,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     };
     setTransportRequests(prev => [...prev, newRequest]);
     addFarmIfNew(newRequest.farm_name);
+    newRequest.destinations.forEach(d => addFarmIfNew(d));
 
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
@@ -2105,6 +2382,167 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
+  // ====== قسم الصيانة — طلبات الصيانة وفواتيرها ======
+
+  const generateMaintenanceRequestNumber = (): string => {
+    const now = new Date();
+    const yy = String(now.getFullYear()).slice(-2);
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const prefix = `MT-${yy}${mm}`;
+    const sameMonth = maintenanceRequests.filter(r => (r.request_number || '').startsWith(prefix + '-'));
+    let maxSeq = 0;
+    sameMonth.forEach(r => {
+      const seq = parseInt((r.request_number || '').split('-')[2] || '0', 10);
+      if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+    });
+    return `${prefix}-${String(maxSeq + 1).padStart(3, '0')}`;
+  };
+
+  const generateMaintenanceInvoiceNumber = (): string => {
+    const now = new Date();
+    const yy = String(now.getFullYear()).slice(-2);
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const prefix = `MINV-${yy}${mm}`;
+    const sameMonth = maintenanceInvoices.filter(i => (i.invoice_number || '').startsWith(prefix + '-'));
+    let maxSeq = 0;
+    sameMonth.forEach(i => {
+      const seq = parseInt((i.invoice_number || '').split('-')[2] || '0', 10);
+      if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+    });
+    return `${prefix}-${String(maxSeq + 1).padStart(3, '0')}`;
+  };
+
+  // إنشاء طلب صيانة جديد — مربوط بـ car_id من قاعدة بيانات السيارات الحالية (بدون أي تكرار لبياناتها)
+  const addMaintenanceRequest = (data: {
+    car_id: string;
+    fault_description: string;
+    workshop_type: 'company' | 'external';
+    workshop_name?: string;
+    request_date: string;
+  }): MaintenanceRequest => {
+    const newRequest: MaintenanceRequest = {
+      id: generateId('mnt'),
+      request_number: generateMaintenanceRequestNumber(),
+      car_id: data.car_id,
+      fault_description: data.fault_description.trim(),
+      workshop_type: data.workshop_type,
+      workshop_name: data.workshop_name?.trim() || undefined,
+      request_date: normalizeDateToYmd(data.request_date),
+      status: 'pending_parts',
+      parts: [],
+      work_performed: '',
+      created_by: currentUser?.name || currentUser?.username,
+    };
+    setMaintenanceRequests(prev => [...prev, newRequest]);
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('maintenance_requests').insert([newRequest]).then(({ error }) => {
+        if (error) console.error("Supabase insert maintenance_request error:", error);
+      });
+    }
+    return newRequest;
+  };
+
+  // تحديث عام لطلب الصيانة — بيحافظ على كل البيانات السابقة (الحالة، القطع، الأعمال المنفذة...)
+  // ولا يصفّر أي حاجة إلا المرسلة فعليًا في updatedFields، حسب قاعدة "عدم الكتابة فوق البيانات السابقة"
+  const updateMaintenanceRequest = (id: string, updatedFields: Partial<MaintenanceRequest>) => {
+    setMaintenanceRequests(prev => prev.map(r => r.id === id ? { ...r, ...updatedFields } : r));
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('maintenance_requests').update(updatedFields).eq('id', id).then(({ error }) => {
+        if (error) console.error("Supabase update maintenance_request error:", error);
+      });
+    }
+  };
+
+  const addMaintenancePart = (requestId: string, part: Omit<MaintenancePartItem, 'id'>) => {
+    const req = maintenanceRequests.find(r => r.id === requestId);
+    if (!req) return;
+    const newPart: MaintenancePartItem = { ...part, id: generateId('part') };
+    updateMaintenanceRequest(requestId, { parts: [...req.parts, newPart] });
+  };
+
+  const deleteMaintenancePart = (requestId: string, partId: string) => {
+    const req = maintenanceRequests.find(r => r.id === requestId);
+    if (!req) return;
+    updateMaintenanceRequest(requestId, { parts: req.parts.filter(p => p.id !== partId) });
+  };
+
+  const deleteMaintenanceRequest = (id: string) => {
+    setMaintenanceRequests(prev => prev.filter(r => r.id !== id));
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('maintenance_requests').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error("Supabase delete maintenance_request error:", error);
+      });
+    }
+  };
+
+  // فتح فاتورة الصيانة المرتبطة بالطلب — بتستكمل بنود قطع الغيار تلقائيًا من الطلب (بدون إعادة كتابة)
+  // ولو الفاتورة موجودة بالفعل بترجّعها زي ما هي من غير ما تنشئ نسخة تانية
+  const openMaintenanceInvoice = (requestId: string): MaintenanceInvoice | null => {
+    const req = maintenanceRequests.find(r => r.id === requestId);
+    if (!req) return null;
+    if (req.invoice_id) {
+      return maintenanceInvoices.find(i => i.id === req.invoice_id) || null;
+    }
+    const partsItems: MaintenanceInvoiceItem[] = req.parts.map(p => ({
+      id: generateId('mii'),
+      description: p.name,
+      item_type: 'parts',
+      source: p.source,
+      quantity: p.quantity,
+      unit_price: 0,
+      total: 0,
+    }));
+    const newInvoice: MaintenanceInvoice = {
+      id: generateId('minv'),
+      invoice_number: generateMaintenanceInvoiceNumber(),
+      maintenance_request_id: requestId,
+      car_id: req.car_id,
+      items: partsItems,
+      discount: 0,
+      status: 'draft',
+      invoice_date: new Date().toISOString().split('T')[0],
+      created_by: currentUser?.name || currentUser?.username,
+    };
+    setMaintenanceInvoices(prev => [...prev, newInvoice]);
+    updateMaintenanceRequest(requestId, { invoice_id: newInvoice.id, status: req.status === 'closed' ? req.status : 'invoiced' });
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('maintenance_invoices').insert([newInvoice]).then(({ error }) => {
+        if (error) console.error("Supabase insert maintenance_invoice error:", error);
+      });
+    }
+    return newInvoice;
+  };
+
+  const updateMaintenanceInvoice = (id: string, updatedFields: Partial<MaintenanceInvoice>) => {
+    setMaintenanceInvoices(prev => prev.map(i => i.id === id ? { ...i, ...updatedFields } : i));
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('maintenance_invoices').update(updatedFields).eq('id', id).then(({ error }) => {
+        if (error) console.error("Supabase update maintenance_invoice error:", error);
+      });
+    }
+  };
+
+  const addMaintenanceInvoiceItem = (invoiceId: string, item: Omit<MaintenanceInvoiceItem, 'id'>) => {
+    const inv = maintenanceInvoices.find(i => i.id === invoiceId);
+    if (!inv) return;
+    const newItem: MaintenanceInvoiceItem = { ...item, id: generateId('mii') };
+    updateMaintenanceInvoice(invoiceId, { items: [...inv.items, newItem] });
+  };
+
+  const deleteMaintenanceInvoiceItem = (invoiceId: string, itemId: string) => {
+    const inv = maintenanceInvoices.find(i => i.id === invoiceId);
+    if (!inv) return;
+    updateMaintenanceInvoice(invoiceId, { items: inv.items.filter(it => it.id !== itemId) });
+  };
+
   // الرد على طلب نقل بسيارة: الحالة تتحول لـ "جاري" ويتم ربط السائق تلقائيًا بالسيارة المختارة
   const respondTransportRequestWithCar = (requestId: string, carId: string): { success: boolean; error?: string } => {
     const request = transportRequests.find(r => r.id === requestId);
@@ -2123,9 +2561,15 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     return { success: true };
   };
 
-  // إنهاء التوصيل: الحالة تتحول لـ "منتهى"
-  const markTransportRequestDelivered = (requestId: string) => {
-    updateTransportRequest(requestId, { status: 'done', delivered_at: new Date().toISOString() });
+  // إنهاء التوصيل: الحالة تتحول لـ "منتهى"، وتاريخ التنفيذ بيتحدد تلقائيًا بتاريخ اليوم (أو
+  // التاريخ المُمرر صراحةً)، وده قابل للتعديل لاحقًا عادي لو الرحلة فعليًا اتأجلت ليوم تاني
+  const markTransportRequestDelivered = (requestId: string, executionDate?: string) => {
+    const request = transportRequests.find(r => r.id === requestId);
+    updateTransportRequest(requestId, {
+      status: 'done',
+      delivered_at: new Date().toISOString(),
+      execution_date: executionDate ? normalizeDateToYmd(executionDate) : (request?.execution_date || normalizeDateToYmd(new Date().toISOString()))
+    });
   };
 
   // Drivers action definitions
@@ -2235,6 +2679,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const affectedRequestIds = transportRequests.filter(r => r.assigned_car_id === id).map(r => r.id);
 
     setCars(prev => prev.filter(c => c.id !== id));
+    // تنضيف سجلات مصاريف السيارة اليومية الخاصة بالسيارة المحذوفة دي (لو موجودة)
+    if (carDailyCosts.some(c => c.car_id === id)) {
+      persistCarDailyCosts(carDailyCosts.filter(c => c.car_id !== id));
+    }
     if (affectedInvoiceIds.length > 0) {
       setInvoices(prev => prev.map(inv => inv.car_id === id ? { ...inv, car_id: undefined } : inv));
     }
@@ -3785,7 +4233,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         resMovements,
         resCustodyAccs,
         resCustodyMovs,
-        resTransportRequests
+        resTransportRequests,
+        resMaintenanceRequests,
+        resMaintenanceInvoices
       ] = await Promise.all([
         supabase.from('drivers').select('*'),
         supabase.from('officials').select('*'),
@@ -3797,7 +4247,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         supabase.from('driver_account_movements').select('*').order('date', { ascending: false }),
         supabase.from('custody_accounts').select('*'),
         supabase.from('custody_movements').select('*').order('date', { ascending: false }),
-        supabase.from('transport_requests').select('*')
+        supabase.from('transport_requests').select('*'),
+        supabase.from('maintenance_requests').select('*'),
+        supabase.from('maintenance_invoices').select('*')
       ]);
 
       const errors = [
@@ -3826,7 +4278,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           movements: resMovements.data || [],
           custodyAccounts: resCustodyAccs.data || [],
           custodyMovements: resCustodyMovs.data || [],
-          transportRequests: resTransportRequests.data || []
+          transportRequests: resTransportRequests.data || [],
+          maintenanceRequests: resMaintenanceRequests.data || [],
+          maintenanceInvoices: resMaintenanceInvoices.data || []
         }
       };
 
@@ -3924,6 +4378,17 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         deleteTransportRequest,
         respondTransportRequestWithCar,
         markTransportRequestDelivered,
+        maintenanceRequests: maintenanceRequests || [],
+        maintenanceInvoices: maintenanceInvoices || [],
+        addMaintenanceRequest,
+        updateMaintenanceRequest,
+        deleteMaintenanceRequest,
+        addMaintenancePart,
+        deleteMaintenancePart,
+        openMaintenanceInvoice,
+        updateMaintenanceInvoice,
+        addMaintenanceInvoiceItem,
+        deleteMaintenanceInvoiceItem,
         isRealtimeActive,
         setRealtimeActive,
         latencyMs,
@@ -3973,6 +4438,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         deleteCompany,
         rolePermissions,
         updateRolePermissions,
+        systemUsers,
+        addSystemUser,
+        updateSystemUser,
+        deleteSystemUser,
         defaultGarageLocation,
         updateDefaultGarageLocation,
         costItemTypes,
@@ -3988,6 +4457,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         transportRequestCosts,
         upsertTransportRequestCost,
         deleteTransportRequestCost,
+        carDailyCosts,
+        upsertCarDailyCost,
+        deleteCarDailyCost,
         resetToInitial,
         exportLocalBackup,
         importLocalBackup,
