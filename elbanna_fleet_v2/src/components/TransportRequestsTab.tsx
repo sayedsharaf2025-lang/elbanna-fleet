@@ -20,7 +20,10 @@ import {
   PackageCheck,
   Hash,
   FileText,
-  Info
+  Info,
+  Plus,
+  Trash2,
+  Route,
 } from 'lucide-react';
 
 export function TransportRequestsTab() {
@@ -30,6 +33,8 @@ export function TransportRequestsTab() {
   // New Request Form State
   const [requesterName, setRequesterName] = useState('');
   const [farmName, setFarmName] = useState('');
+  // الواجهات بعد نقطة التحميل (المزرعة) — أول واجهة إجبارية (وجهة التفريغ)، وأي واجهة بعدها اختيارية
+  const [destinations, setDestinations] = useState<string[]>(['']);
   const [carType, setCarType] = useState('');
   const [cargoDescription, setCargoDescription] = useState('');
   const [requestDate, setRequestDate] = useState(new Date().toISOString().split('T')[0]);
@@ -47,18 +52,25 @@ export function TransportRequestsTab() {
   const resetForm = () => {
     setRequesterName('');
     setFarmName('');
+    setDestinations(['']);
     setCarType('');
     setCargoDescription('');
     setRequestDate(new Date().toISOString().split('T')[0]);
   };
 
+  const addDestinationField = () => setDestinations(prev => [...prev, '']);
+  const removeDestinationField = (idx: number) => setDestinations(prev => prev.filter((_, i) => i !== idx));
+  const updateDestinationField = (idx: number, value: string) => setDestinations(prev => prev.map((d, i) => i === idx ? value : d));
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!requesterName.trim() || !farmName.trim() || !carType.trim() || !requestDate) return;
+    const cleanedDestinations = destinations.map(d => d.trim()).filter(Boolean);
+    if (!requesterName.trim() || !farmName.trim() || cleanedDestinations.length === 0 || !carType.trim() || !requestDate) return;
 
     const newReq = db.addTransportRequest({
       requester_name: requesterName.trim(),
       farm_name: farmName.trim(),
+      destinations: cleanedDestinations,
       car_type: carType.trim(),
       cargo_description: cargoDescription.trim(),
       request_date: requestDate
@@ -179,6 +191,40 @@ export function TransportRequestsTab() {
                     <option key={f} value={f} />
                   ))}
                 </datalist>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-slate-500 font-bold flex items-center gap-1"><Route className="w-3.5 h-3.5" /> الواجهات (التفريغ، ثم أي وجهة إضافية بالترتيب)</label>
+                  <button type="button" onClick={addDestinationField} className="text-emerald-600 hover:text-emerald-700 text-[10px] font-bold flex items-center gap-1">
+                    <Plus className="w-3 h-3" /> إضافة واجهة
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {destinations.map((dest, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <span className="text-slate-400 font-mono text-[10px] w-4 shrink-0">{idx + 1}.</span>
+                      <input
+                        type="text"
+                        required={idx === 0}
+                        list="farms-datalist"
+                        placeholder={idx === 0 ? 'وجهة التفريغ الأساسية' : 'وجهة إضافية (اختياري)'}
+                        className="flex-1 p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 text-slate-800 font-bold bg-slate-50/50"
+                        value={dest}
+                        onChange={(e) => updateDestinationField(idx, e.target.value)}
+                        autoComplete="off"
+                      />
+                      {destinations.length > 1 && (
+                        <button type="button" onClick={() => removeDestinationField(idx)} className="text-rose-400 hover:text-rose-600 shrink-0">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed">
+                  خط السير النهائي هيتظبط تلقائيًا: جراج السيارة ← {farmName || 'المزرعة'} ← {destinations.filter(Boolean).join(' ← ') || 'الواجهات اللي تحددها'} ← رجوع للجراج.
+                </p>
               </div>
 
               <div>
@@ -307,7 +353,7 @@ export function TransportRequestsTab() {
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-slate-500">
                     <p className="flex items-center gap-1"><User className="w-3.5 h-3.5 text-slate-400" /> {r.requester_name}</p>
-                    <p className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-slate-400" /> {r.farm_name}</p>
+                    <p className="flex items-center gap-1"><Route className="w-3.5 h-3.5 text-slate-400" /> {r.farm_name} ← {(r.destinations || []).join(' ← ')}</p>
                     <p className="flex items-center gap-1"><Truck className="w-3.5 h-3.5 text-slate-400" /> {r.car_type}</p>
                     <p className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-400" /> {r.request_date}</p>
                   </div>

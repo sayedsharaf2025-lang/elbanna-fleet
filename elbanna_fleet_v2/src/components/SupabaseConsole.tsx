@@ -276,7 +276,39 @@ CREATE TABLE IF NOT EXISTS transport_requests (
   created_by VARCHAR(100)
 );
 
--- 13. تعطيل حماية الصفوف (DISABLE RLS) للمزامنة المفتوحة السلسة عبر جميع الأجهزة والهواتف
+-- 13. Maintenance Requests Table (طلبات الصيانة) — مربوطة بـ car_id من قاعدة بيانات السيارات
+--     الحالية (نفس جدول cars) بدون أي تكرار لبياناتها؛ قطع الغيار مخزنة كـ JSONB داخل نفس الصف
+CREATE TABLE IF NOT EXISTS maintenance_requests (
+  id TEXT PRIMARY KEY,
+  request_number VARCHAR(30) UNIQUE NOT NULL,
+  car_id TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+  fault_description TEXT NOT NULL,
+  workshop_type VARCHAR(20) CHECK (workshop_type IN ('company', 'external')) DEFAULT 'company',
+  workshop_name VARCHAR(150),
+  request_date DATE NOT NULL,
+  maintenance_date DATE,
+  status VARCHAR(20) CHECK (status IN ('pending_parts', 'in_progress', 'pending_review', 'pending_invoice', 'invoiced', 'closed')) DEFAULT 'pending_parts',
+  parts JSONB DEFAULT '[]'::jsonb,
+  work_performed TEXT DEFAULT '',
+  created_by VARCHAR(100),
+  invoice_id TEXT
+);
+
+-- 14. Maintenance Invoices Table (فواتير الصيانة) — بنود قطع الغيار تُنسخ تلقائيًا من الطلب،
+--     والمصنعية تُضاف يدويًا من المحاسب؛ كلاهما داخل عمود items كـ JSONB
+CREATE TABLE IF NOT EXISTS maintenance_invoices (
+  id TEXT PRIMARY KEY,
+  invoice_number VARCHAR(30) UNIQUE NOT NULL,
+  maintenance_request_id TEXT NOT NULL REFERENCES maintenance_requests(id) ON DELETE CASCADE,
+  car_id TEXT NOT NULL REFERENCES cars(id) ON DELETE CASCADE,
+  items JSONB DEFAULT '[]'::jsonb,
+  discount NUMERIC(12,2) DEFAULT 0,
+  status VARCHAR(20) CHECK (status IN ('draft', 'approved', 'paid')) DEFAULT 'draft',
+  invoice_date DATE NOT NULL,
+  created_by VARCHAR(100)
+);
+
+-- 15. تعطيل حماية الصفوف (DISABLE RLS) للمزامنة المفتوحة السلسة عبر جميع الأجهزة والهواتف
 ALTER TABLE officials DISABLE ROW LEVEL SECURITY;
 ALTER TABLE drivers DISABLE ROW LEVEL SECURITY;
 ALTER TABLE cars DISABLE ROW LEVEL SECURITY;
@@ -289,8 +321,10 @@ ALTER TABLE custody_accounts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE custody_movements DISABLE ROW LEVEL SECURITY;
 ALTER TABLE system_settings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE transport_requests DISABLE ROW LEVEL SECURITY;
+ALTER TABLE maintenance_requests DISABLE ROW LEVEL SECURITY;
+ALTER TABLE maintenance_invoices DISABLE ROW LEVEL SECURITY;
 
--- 14. تدارك إضافة الأعمدة القديمة تلقائيًا (Migration Scripts)
+-- 16. تدارك إضافة الأعمدة القديمة تلقائيًا (Migration Scripts)
 ALTER TABLE officials ADD COLUMN IF NOT EXISTS password VARCHAR(100) DEFAULT '123';
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);`;
 

@@ -21,7 +21,9 @@ import {
   PackageCheck,
   AlertTriangle,
   FileText,
-  Send
+  Send,
+  Route,
+  Plus
 } from 'lucide-react';
 
 export function RequestsTrackingTab() {
@@ -42,6 +44,11 @@ export function RequestsTrackingTab() {
     cargo_description: string;
     request_date: string;
   }>({ requester_name: '', farm_name: '', car_type: '', cargo_description: '', request_date: '' });
+  const [editDestinations, setEditDestinations] = useState<string[]>([]);
+
+  // Inline execution-date edit state (للطلبات المنتهية — تعديل تاريخ التنفيذ لو الرحلة اتأجلت)
+  const [editingExecDateId, setEditingExecDateId] = useState<string | null>(null);
+  const [execDateDraft, setExecDateDraft] = useState('');
 
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -111,6 +118,7 @@ export function RequestsTrackingTab() {
       cargo_description: r.cargo_description || '',
       request_date: r.request_date
     });
+    setEditDestinations(r.destinations && r.destinations.length > 0 ? [...r.destinations] : ['']);
   };
 
   const cancelEdit = () => {
@@ -122,9 +130,15 @@ export function RequestsTrackingTab() {
       showToast('error', 'يرجى استكمال الحقول الأساسية قبل الحفظ');
       return;
     }
+    const cleanedDestinations = editDestinations.map(d => d.trim()).filter(Boolean);
+    if (cleanedDestinations.length === 0) {
+      showToast('error', 'يرجى تحديد وجهة واحدة على الأقل لخط السير');
+      return;
+    }
     db.updateTransportRequest(id, {
       requester_name: editFields.requester_name.trim(),
       farm_name: editFields.farm_name.trim(),
+      destinations: cleanedDestinations,
       car_type: editFields.car_type.trim(),
       cargo_description: editFields.cargo_description.trim(),
       request_date: editFields.request_date
@@ -138,6 +152,18 @@ export function RequestsTrackingTab() {
       db.markTransportRequestDelivered(r.id);
       showToast('success', 'تم إنهاء الطلب وتسجيله كمُسلَّم.');
     }
+  };
+
+  const startEditExecDate = (r: TransportRequest) => {
+    setEditingExecDateId(r.id);
+    setExecDateDraft(r.execution_date || r.request_date);
+  };
+
+  const saveExecDate = (id: string) => {
+    if (!execDateDraft) return;
+    db.updateTransportRequest(id, { execution_date: execDateDraft });
+    setEditingExecDateId(null);
+    showToast('success', 'تم تحديث تاريخ التنفيذ بنجاح.');
   };
 
   return (
@@ -233,13 +259,23 @@ export function RequestsTrackingTab() {
                       </>
                     )}
                     {r.status === 'in_progress' && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeliver(r)}
-                        className="flex items-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> تأكيد التسليم
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleDeliver(r)}
+                          className="flex items-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> تأكيد التسليم
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startEdit(r)}
+                          className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold px-2.5 py-1.5 rounded-lg transition-all"
+                          title="تعديل بيانات الطلب أو إضافة/تعديل الوجهات"
+                        >
+                          <Pencil className="w-3.5 h-3.5" /> تعديل
+                        </button>
+                      </>
                     )}
                   </div>
                 )}
@@ -249,7 +285,7 @@ export function RequestsTrackingTab() {
                 <>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-slate-500">
                     <p className="flex items-center gap-1"><User className="w-3.5 h-3.5 text-slate-400" /> {r.requester_name}</p>
-                    <p className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-slate-400" /> {r.farm_name}</p>
+                    <p className="flex items-center gap-1"><Route className="w-3.5 h-3.5 text-slate-400" /> {r.farm_name} ← {(r.destinations || []).join(' ← ')}</p>
                     <p className="flex items-center gap-1"><Truck className="w-3.5 h-3.5 text-slate-400" /> {r.car_type}</p>
                     <p className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-400" /> {r.request_date}</p>
                   </div>
@@ -258,18 +294,48 @@ export function RequestsTrackingTab() {
                       <FileText className="w-3.5 h-3.5 text-slate-400 mt-0.5 shrink-0" /> {r.cargo_description}
                     </p>
                   )}
+                  {r.status === 'done' && (
+                    <div className="mt-2 flex items-center gap-2 text-[11px]">
+                      <span className="text-slate-500 font-bold flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-400" /> تاريخ التنفيذ (المعتمد في حساب التكلفة):</span>
+                      {editingExecDateId === r.id ? (
+                        <>
+                          <input
+                            type="date"
+                            value={execDateDraft}
+                            onChange={(e) => setExecDateDraft(e.target.value)}
+                            className="p-1.5 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 text-slate-800 font-mono text-[11px]"
+                          />
+                          <button type="button" onClick={() => saveExecDate(r.id)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-2 py-1 rounded text-[10px] font-bold">حفظ</button>
+                          <button type="button" onClick={() => setEditingExecDateId(null)} className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-[10px] font-bold">إلغاء</button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="font-mono font-bold text-slate-700">{r.execution_date || r.request_date}</span>
+                          <button type="button" onClick={() => startEditExecDate(r)} className="text-indigo-500 hover:text-indigo-700" title="تعديل تاريخ التنفيذ (لو الرحلة اتأجلت)">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {(r.status === 'in_progress' || r.status === 'done') && r.assigned_car_id && (
                     <div className="mt-2.5 pt-2.5 border-t border-slate-50 text-[11px] text-slate-600 font-bold flex flex-wrap gap-3">
                       <span>🚚 السيارة: {db.cars.find(c => c.id === r.assigned_car_id)?.car_number || '-'}</span>
                       <span>🧑‍✈️ السائق: {driverNameFor(r.assigned_driver_id)}</span>
                       {(() => {
                         const cost = db.transportRequestCosts.find(c => c.request_id === r.id);
-                        if (!cost) return <span className="text-slate-400 font-medium">💰 تكلفة النقلة: لسه ماتسجلتش</span>;
-                        const legsCost = (cost.legs || []).reduce((sum, l) => sum + (l.smoke_amount || 0) + (l.freight_amount || 0), 0);
-                        const total = legsCost + (cost.cards_amount || 0) + (cost.violations_amount || 0)
-                          + (cost.tire_wash_amount || 0) + (cost.maintenance_amount || 0)
-                          + (cost.extra_costs || []).reduce((sum, i) => sum + (i.amount || 0), 0);
-                        return <span className="text-emerald-600">💰 تكلفة النقلة: {total.toLocaleString()} ج.م</span>;
+                        if (!cost || !cost.legs || cost.legs.length === 0) return <span className="text-slate-400 font-medium">💨 دخان النقلة: لسه ماتسجلش</span>;
+                        const smokeTotal = cost.legs.reduce((sum, l) => sum + (l.smoke_amount || 0), 0);
+                        return <span className="text-emerald-600">💨 دخان النقلة: {smokeTotal.toLocaleString()} ج.م</span>;
+                      })()}
+                      {(() => {
+                        if (!r.execution_date) return null;
+                        const daily = db.carDailyCosts.find(c => c.car_id === r.assigned_car_id && c.date === r.execution_date);
+                        if (!daily) return <span className="text-slate-400 font-medium">🚛 نولون/مصاريف اليوم: لسه ماتسجلتش</span>;
+                        const dayTotal = (daily.freight_amount || 0) + (daily.cards_amount || 0) + (daily.violations_amount || 0)
+                          + (daily.tire_wash_amount || 0) + (daily.maintenance_amount || 0)
+                          + (daily.extra_costs || []).reduce((sum, i) => sum + (i.amount || 0), 0);
+                        return <span className="text-indigo-600">🚛 إجمالي مصاريف السيارة في {r.execution_date}: {dayTotal.toLocaleString()} ج.م</span>;
                       })()}
                     </div>
                   )}
@@ -315,6 +381,42 @@ export function RequestsTrackingTab() {
                       value={editFields.request_date}
                       onChange={(e) => setEditFields(prev => ({ ...prev, request_date: e.target.value }))}
                     />
+                  </div>
+                  <div className="md:col-span-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-500 font-bold flex items-center gap-1"><Route className="w-3.5 h-3.5" /> الواجهات (التفريغ، ثم أي وجهة إضافية بالترتيب)</label>
+                      <button
+                        type="button"
+                        onClick={() => setEditDestinations(prev => [...prev, ''])}
+                        className="text-emerald-600 hover:text-emerald-700 text-[10px] font-bold flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" /> إضافة واجهة
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {editDestinations.map((dest, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="text-slate-400 font-mono text-[10px] w-4 shrink-0">{idx + 1}.</span>
+                          <input
+                            type="text"
+                            list="farms-datalist-edit"
+                            placeholder={idx === 0 ? 'وجهة التفريغ الأساسية' : 'وجهة إضافية (اختياري)'}
+                            className="flex-1 p-2 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 text-slate-800"
+                            value={dest}
+                            onChange={(e) => setEditDestinations(prev => prev.map((d, i) => i === idx ? e.target.value : d))}
+                          />
+                          {editDestinations.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setEditDestinations(prev => prev.filter((_, i) => i !== idx))}
+                              className="text-rose-400 hover:text-rose-600 shrink-0"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                   <div className="md:col-span-2">
                     <label className="block text-slate-500 font-bold mb-1">وصف الحمولة</label>
