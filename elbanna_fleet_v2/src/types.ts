@@ -18,8 +18,9 @@ export interface SystemUser {
   username: string; // اسم المستخدم لتسجيل الدخول (فريد، قابل للتعديل بالكامل)
   password: string; // كلمة المرور
   display_name: string; // الاسم الظاهر بالنظام (مثال: "أحمد - مدير التقارير")
-  role_tag: 'admin' | 'manager' | 'movement_supervisor' | 'requests_agent' | 'custom'; // تصنيف مرجعي فقط لأغراض العرض، مايتحكمش في الشاشات
+  role_tag: 'admin' | 'manager' | 'movement_supervisor' | 'requests_agent' | 'custom'; // تصنيف داخلي فقط (مايظهرش للأدمن)، لأغراض فلترة بيانات العهدة القديمة فقط
   allowed_screens: string[]; // الشاشات المخصصة لهذا المستخدم تحديدًا — مش موروثة من قسم
+  linked_official_id?: string; // لو المستخدم ده عنده صلاحية "فواتير تراخيص"، بيتربط تلقائيًا بحساب عهدة (Official) بنفس المعرّف ده
 }
 
 export interface Driver {
@@ -147,23 +148,33 @@ export interface TransportRequestExtraCost {
   amount: number;
 }
 
-// محطة واحدة من محطات خط سير الرحلة (من → إلى)، بتفاصيل المسافة والدخان والنولون الخاصة بيها
-export interface TransportRouteLeg {
-  id: string;
+// دخان محطة واحدة من محطات خط سير الطلب (من → إلى) — مُقترح من لائحة خطوط السير، وقابل للتعديل.
+// من/إلى بتتولد من farm_name + destinations بتاعة الطلب نفسه وقت الحفظ (نسخة ثابتة وقت التسجيل)
+export interface TransportRouteLegSmoke {
   from_location: string;
   to_location: string;
-  distance_km: number; // تُقترح من لائحة خطوط السير، وقابلة للتعديل
-  smoke_amount: number; // يُقترح من لائحة خطوط السير، وقابل للتعديل
-  freight_amount: number; // يُحسب: المسافة × سعر نوع السيارة، وقابل للتعديل
+  smoke_amount: number;
 }
 
-// تفاصيل تكلفة خط سير طلب نقل معين — المرجع request_id يربطها بـ TransportRequest
-// الرحلة ممكن تكون أكتر من محطة (من البداية للمزرعة، ومن المزرعة لوجهة تانية، وهكذا)
+// تكلفة الدخان لطلب نقل معين فقط — المرجع request_id يربطها بـ TransportRequest.
+// باقي التكلفة (النولون، كارتات، مخالفات، غسيل كاوتش، صيانة) بقت مربوطة بالسيارة واليوم ككل
+// (شوف CarDailyCost) مش بكل طلب لوحده، عشان تدعم حساب ربحية السيارة في اليوم كله.
 export interface TransportRequestCost {
   id: string;
   request_id: string;
-  legs: TransportRouteLeg[]; // محطات خط السير بالترتيب (أول محطة: من نقطة البداية إلى مزرعة الطالب)
-  auto_return: boolean; // true = آخر محطة فيها رجوع تلقائي لنقطة البداية/الجراج؛ false = في نقلة تانية بعدها لنفس السيارة نفس اليوم فمفيش رجوع
+  legs: TransportRouteLegSmoke[]; // دخان كل محطة في خط سير الطلب بالترتيب
+  updated_at: string;
+  updated_by?: string;
+}
+
+// مصاريف وأرباح سيارة معينة في تاريخ تنفيذ معين (يوم كامل) — المسافة الكلية من الجراج للجراج،
+// والنولون المحسوب منها، وكل المصاريف اليدوية اللي بترتبط باليوم مش بطلب بعينه
+export interface CarDailyCost {
+  id: string;
+  car_id: string;
+  date: string; // تاريخ التنفيذ
+  total_distance_km: number; // المسافة الكلية الفعلية من الجراج للجراج (يدوي أو استيراد ملف)
+  freight_amount: number; // النولون = المسافة × سعر نوع السيارة، مقترح تلقائيًا وقابل للتعديل
   cards_amount: number; // كارتات (يدوي)
   violations_amount: number; // مخالفات (يدوي)
   tire_wash_amount: number; // غسيل كاوتش (يدوي)
@@ -177,10 +188,12 @@ export interface TransportRequest {
   id: string; // UUID
   request_number: string; // رقم الطلب بصيغة سنة+شهر وأرقام تسلسلية من 4 خانات، مثال: 2608-0001
   requester_name: string; // اسم الطالب
-  farm_name: string; // مكان الطلب (اسم المزرعة)
+  farm_name: string; // مكان الطلب (نقطة التحميل/البداية)
+  destinations: string[]; // الواجهات بالترتيب بعد نقطة التحميل (وجهة التفريغ، ثم أي وجهة إضافية...)
   car_type: string; // نوع السيارة المطلوبة (جامبو / دبابة / ملاكي)
   cargo_description: string; // وصف الحمولة
-  request_date: string; // تاريخ الطلب
+  request_date: string; // تاريخ الطلب (تاريخ التسجيل)
+  execution_date?: string; // تاريخ التنفيذ الفعلي — يتحدد تلقائيًا عند التعليم كـ"منتهي"، وقابل للتعديل لاحقًا
   status: 'new' | 'in_progress' | 'done'; // جديد (بدون سيارة) / جاري (تم الرد بسيارة) / منتهى (تم التوصيل)
   assigned_car_id?: string; // السيارة التي تم الرد بها على الطلب
   assigned_driver_id?: string; // السائق المرتبط بالسيارة، يُضاف تلقائيًا
@@ -198,4 +211,61 @@ export interface DriverAccountMovement {
   amount_change: number; // التغيير في الرصيد (مثال: -200 أو +200)
   new_balance: number; // الرصيد النهائي بعد الحركة
   type: 'deduction' | 'violation' | 'payment' | 'reversal'; // نوع الحركة
+}
+
+// ====== قسم الصيانة — مبني فوق قاعدة بيانات السيارات الحالية (car_id = Car.id)، بدون أي تكرار لبياناتها ======
+
+export type MaintenanceRequestStatus =
+  | 'pending_parts'   // بانتظار قطع الغيار
+  | 'in_progress'     // جاري التنفيذ
+  | 'pending_review'  // بانتظار مراجعة مدير الصيانة
+  | 'pending_invoice' // بانتظار فتح الفاتورة
+  | 'invoiced'        // تم إنشاء الفاتورة
+  | 'closed';         // مغلق
+
+// بند قطعة غيار داخل طلب الصيانة — المصدر بيحدد هل بتتحسب تكلفة عليها وقت الفاتورة (ورشة خارجية) أو لا (مخزن الشركة)
+export interface MaintenancePartItem {
+  id: string;
+  name: string; // اسم القطعة
+  source: 'company_stock' | 'external_workshop'; // مخزن الشركة / الورشة الخارجية
+  quantity: number;
+}
+
+export interface MaintenanceRequest {
+  id: string;
+  request_number: string; // رقم طلب الصيانة
+  car_id: string; // ربط أساسي بالسيارة الموجودة فعليًا في قاعدة بيانات الأسطول — المعرّف الوحيد المعتمد
+  fault_description: string; // وصف العطل
+  workshop_type: 'company' | 'external'; // صيانة داخل الشركة / ورشة خارجية
+  workshop_name?: string; // اسم الورشة الخارجية (لو النوع external)
+  request_date: string; // تاريخ تسجيل طلب الصيانة
+  maintenance_date?: string; // تاريخ تنفيذ الصيانة الفعلي
+  status: MaintenanceRequestStatus;
+  parts: MaintenancePartItem[]; // بنود طلب قطع الغيار — جزء من نفس الطلب (بدون تكرار في جدول منفصل)
+  work_performed: string; // الأعمال التي تم تنفيذها (وصف حر يتراكم مع تقدم الحالة)
+  created_by?: string; // اسم المستخدم اللي سجل الطلب
+  invoice_id?: string; // الفاتورة المرتبطة بالطلب لو اتعملت
+}
+
+// بند في فاتورة الصيانة — قطع غيار (منسوخة تلقائيًا من طلب الصيانة) أو مصنعية (المحاسب بيضيفها يدويًا)
+export interface MaintenanceInvoiceItem {
+  id: string;
+  description: string;
+  item_type: 'parts' | 'labor'; // قطع غيار / مصنعية
+  source?: 'company_stock' | 'external_workshop'; // لبنود القطع بس — لتمييز المصدر ومنع الحساب المزدوج
+  quantity: number;
+  unit_price: number;
+  total: number;
+}
+
+export interface MaintenanceInvoice {
+  id: string;
+  invoice_number: string;
+  maintenance_request_id: string; // ربط بطلب الصيانة
+  car_id: string; // ربط مباشر بالسيارة (نفس معرّف طلب الصيانة، لسهولة الاستعلام)
+  items: MaintenanceInvoiceItem[]; // قطع الغيار (تلقائي) + المصنعية (يدوي من المحاسب)
+  discount: number; // الخصم
+  status: 'draft' | 'approved' | 'paid'; // تحت المراجعة / معتمدة / مصروفة
+  invoice_date: string;
+  created_by?: string;
 }

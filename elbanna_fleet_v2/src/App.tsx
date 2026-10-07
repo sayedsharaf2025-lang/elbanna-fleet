@@ -20,6 +20,8 @@ import { TransportRequestsTab } from './components/TransportRequestsTab';
 import { RequestsTrackingTab } from './components/RequestsTrackingTab';
 import { TransportCostSettingsTab } from './components/TransportCostSettingsTab';
 import { RouteAccountingTab } from './components/RouteAccountingTab';
+import { CarDailyCostsTab } from './components/CarDailyCostsTab';
+import { MaintenanceTab } from './components/MaintenanceTab';
 import {
   LayoutDashboard,
   Truck,
@@ -41,26 +43,27 @@ import {
   Send,
   ClipboardList,
   Fuel,
-  Route
+  Route,
+  Gauge,
+  Wrench
 } from 'lucide-react';
 
 function DashboardLayout() {
   const db = useDb();
 
   // Filter tab list based on logged-in user — دلوقتي بيتحسب من خريطة الصلاحيات القابلة للتعديل من
-  // شاشة "إدارة مستخدمي النظام والصلاحيات"، ولمشرفي الصرف تحديدًا من شاشاته الخاصة (لو محددة له)
-  // قبل الرجوع لصلاحيات رتبة "مشرف صرف" المشتركة — بحيث أي تعديل يتفعّل فورًا من غير تسجيل خروج
+  // شاشة "المستخدمين" — كل مستخدم بشاشاته الخاصة مباشرة، من غير ارتباط بقسم أو رتبة. بنقرا
+  // الشاشات حية من جدول systemUsers (مش من الجلسة المخزّنة وقت الدخول) عشان أي تعديل يتفعّل
+  // فورًا من غير ما يحتاج المستخدم يعمل تسجيل خروج ودخول.
   const allowedTabs = React.useMemo(() => {
     const user = db.currentUser;
     if (!user) return [];
-    if (user.role === 'supervisor' && user.officialId) {
-      const customScreens = db.officialCustomScreens?.[user.officialId];
-      if (customScreens && customScreens.length > 0) return customScreens;
-    }
-    return db.rolePermissions?.[user.role] || [];
-  }, [db.currentUser, db.rolePermissions, db.officialCustomScreens]);
+    const liveUser = db.systemUsers?.find(u => u.id === user.systemUserId);
+    if (liveUser) return liveUser.allowed_screens;
+    return user.allowedScreens || [];
+  }, [db.currentUser, db.systemUsers]);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -129,8 +132,10 @@ function DashboardLayout() {
         { id: 'deductions' as const, label: 'الخصومات الفردية والجماعية', icon: CreditCard },
         { id: 'cross_accounts' as const, label: 'أرشيف وحسابات السائقين (شهرية)', icon: FileSpreadsheet },
         { id: 'route_accounting' as const, label: 'حساب خطوط السير', icon: Route },
+        { id: 'car_daily_costs' as const, label: 'مصاريف وأرباح السيارات اليومية', icon: Gauge },
       ]
     },
+    { type: 'standalone' as const, id: 'maintenance' as const, label: 'قسم الصيانة', icon: Wrench },
     { type: 'standalone' as const, id: 'reports' as const, label: 'شاشة التقارير والمطبوعات الموحدة', icon: FileText },
   ];
 
@@ -167,7 +172,7 @@ function DashboardLayout() {
             <div className="flex items-center gap-3 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
               <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
               <span className="text-slate-300 font-extrabold whitespace-nowrap">
-                {db.currentUser?.role === 'admin' ? '👤 مدير النظام' : db.currentUser?.role === 'manager' ? '📈 المدير المالي' : db.currentUser?.role === 'movement_supervisor' ? '🚚 مشرف الحركة' : db.currentUser?.role === 'requests_agent' ? '📋 مستخدم طلبات النقل' : `🧑‍✈️ مشرف: ${db.currentUser?.name || db.currentUser?.username}`}
+                {`👤 ${db.currentUser?.name || db.currentUser?.username}`}
               </span>
               <button
                 onClick={() => db.logout()}
@@ -358,6 +363,8 @@ function DashboardLayout() {
             {activeTab === 'users_settings' && <UsersSettingsTab />}
             {activeTab === 'transport_cost_settings' && <TransportCostSettingsTab />}
             {activeTab === 'route_accounting' && <RouteAccountingTab />}
+            {activeTab === 'car_daily_costs' && <CarDailyCostsTab />}
+            {activeTab === 'maintenance' && <MaintenanceTab />}
           </div>
         </main>
 
