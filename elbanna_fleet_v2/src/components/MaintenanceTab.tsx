@@ -44,8 +44,23 @@ const STATUS_COLORS: Record<MaintenanceRequestStatus, string> = {
   closed: 'bg-slate-100 text-slate-500 border-slate-200',
 };
 
-export function MaintenanceTab() {
+// ====== أوضاع الشاشة: كل مستلم طلب ليه شاشة مستقلة بترى الطلبات المنتظرة منه بس ======
+// full = الشاشة الكاملة القديمة (للأدمن)، والباقي شاشات الأدوار
+export type MaintenanceMode = 'full' | 'requests' | 'parts' | 'execution' | 'review' | 'accounting';
+
+const MODE_CONFIG: Record<MaintenanceMode, { title: string; subtitle: string; inbox: MaintenanceRequestStatus[] | null; canCreate: boolean }> = {
+  full: { title: 'قسم الصيانة', subtitle: 'مبني فوق قاعدة بيانات السيارات الحالية مباشرة — بيانات السيارة وسجل صيانتها السابق بيظهروا تلقائيًا عند اختيارها، بدون أي تكرار أو إعادة إدخال.', inbox: null, canCreate: true },
+  requests: { title: 'طلبات الصيانة', subtitle: 'سجّل طلب صيانة جديد وتابع حالته. استلام قطع الغيار والتنفيذ والمراجعة من اختصاص الأقسام المختصة.', inbox: null, canCreate: true },
+  parts: { title: 'قطع الغيار', subtitle: 'الطلبات المنتظرة منك: حدّد قطع الغيار المطلوبة ومصدر كل قطعة، ثم أحِل الطلب للتنفيذ.', inbox: ['pending_parts'], canCreate: false },
+  execution: { title: 'تنفيذ الصيانة', subtitle: 'الطلبات المنتظرة منك: سجّل الأعمال التي تم تنفيذها ثم أرسل الطلب للمراجعة.', inbox: ['in_progress'], canCreate: false },
+  review: { title: 'مراجعة واعتماد الصيانة', subtitle: 'الطلبات المنتظرة منك: راجع الأعمال وقطع الغيار، ثم اعتمد الطلب أو أرجعه للتنفيذ مع سبب.', inbox: ['pending_review'], canCreate: false },
+  accounting: { title: 'فواتير الصيانة', subtitle: 'الطلبات المنتظرة منك: افتح الفاتورة وأضف المصنعية، ثم أغلق الطلب بعد اكتمال الفاتورة.', inbox: ['pending_invoice', 'invoiced'], canCreate: false },
+};
+
+export function MaintenanceTab({ mode = 'full' }: { mode?: MaintenanceMode }) {
   const db = useDb();
+  const cfg = MODE_CONFIG[mode];
+  const [scope, setScope] = useState<'inbox' | 'all'>('inbox');
   const [view, setView] = useState<'list' | 'new' | 'detail'>('list');
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -59,6 +74,7 @@ export function MaintenanceTab() {
   const filteredRequests = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return db.maintenanceRequests
+      .filter(r => !cfg.inbox || scope === 'all' || cfg.inbox.includes(r.status))
       .filter(r => statusFilter === 'all' || r.status === statusFilter)
       .filter(r => {
         if (!term) return true;
@@ -67,7 +83,7 @@ export function MaintenanceTab() {
       })
       .sort((a, b) => b.request_number.localeCompare(a.request_number));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db.maintenanceRequests, db.cars, searchTerm, statusFilter]);
+  }, [db.maintenanceRequests, db.cars, searchTerm, statusFilter, scope, mode]);
 
   const openDetail = (id: string) => { setActiveRequestId(id); setView('detail'); };
 
@@ -76,10 +92,10 @@ export function MaintenanceTab() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
           <span className="text-xs font-bold text-emerald-600 tracking-wider block uppercase mb-1">إدارة الأسطول</span>
-          <h2 className="text-xl md:text-2xl font-black text-slate-800 font-sans tracking-tight flex items-center gap-2"><Wrench className="w-6 h-6" /> قسم الصيانة</h2>
-          <p className="text-xs text-slate-500 mt-1 leading-relaxed">مبني فوق قاعدة بيانات السيارات الحالية مباشرة — بيانات السيارة وسجل صيانتها السابق بيظهروا تلقائيًا عند اختيارها، بدون أي تكرار أو إعادة إدخال.</p>
+          <h2 className="text-xl md:text-2xl font-black text-slate-800 font-sans tracking-tight flex items-center gap-2"><Wrench className="w-6 h-6" /> {cfg.title}</h2>
+          <p className="text-xs text-slate-500 mt-1 leading-relaxed">{cfg.subtitle}</p>
         </div>
-        {view === 'list' && (
+        {view === 'list' && cfg.canCreate && (
           <button type="button" onClick={() => setView('new')} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center gap-1.5">
             <Plus className="w-3.5 h-3.5" /> طلب صيانة جديد
           </button>
@@ -99,6 +115,16 @@ export function MaintenanceTab() {
 
       {view === 'list' && (
         <>
+          {cfg.inbox && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => setScope('inbox')} className={`text-xs font-bold px-4 py-2 rounded-lg border ${scope === 'inbox' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200'}`}>
+                المنتظرة مني ({db.maintenanceRequests.filter(r => cfg.inbox!.includes(r.status)).length})
+              </button>
+              <button type="button" onClick={() => setScope('all')} className={`text-xs font-bold px-4 py-2 rounded-lg border ${scope === 'all' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-200'}`}>
+                كل الطلبات (عرض فقط)
+              </button>
+            </div>
+          )}
           <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow px-6 space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-[1fr,220px] gap-3">
               <div>
@@ -151,7 +177,7 @@ export function MaintenanceTab() {
       {view === 'detail' && activeRequestId && (() => {
         const req = db.maintenanceRequests.find(r => r.id === activeRequestId);
         if (!req) return null;
-        return <MaintenanceRequestDetail request={req} onToast={showToast} />;
+        return <MaintenanceRequestDetail request={req} onToast={showToast} mode={mode} />;
       })()}
     </div>
   );
@@ -265,8 +291,14 @@ function NewMaintenanceRequestForm({ onCreated, onCancel }: { onCreated: (id: st
 }
 
 // ====== تفاصيل طلب الصيانة — بيانات السيارة + قطع الغيار + الأعمال المنفذة + تقدم الحالة + الفاتورة ======
-function MaintenanceRequestDetail({ request, onToast }: { request: MaintenanceRequest; onToast: (t: string) => void }) {
+function MaintenanceRequestDetail({ request, onToast, mode }: { request: MaintenanceRequest; onToast: (t: string) => void; mode: MaintenanceMode }) {
   const db = useDb();
+  const cfg = MODE_CONFIG[mode];
+  // صلاحيات التنفيذ حسب الشاشة والمرحلة الحالية للطلب — مفيش حد يقدر يقفز مرحلة مش بتاعته
+  const canEditParts = mode === 'full' || (mode === 'parts' && request.status === 'pending_parts');
+  const canEditWork = mode === 'full' || (mode === 'execution' && request.status === 'in_progress');
+  const canHandleInvoice = mode === 'full' || (mode === 'accounting' && (request.status === 'pending_invoice' || request.status === 'invoiced'));
+  const isInboxItem = mode === 'full' || (cfg.inbox ? cfg.inbox.includes(request.status) : false);
   const car = db.cars.find(c => c.id === request.car_id);
   const driverName = car?.driver_id ? (db.drivers.find(d => d.id === car.driver_id)?.name) : undefined;
 
@@ -300,6 +332,25 @@ function MaintenanceRequestDetail({ request, onToast }: { request: MaintenanceRe
   const handleOpenInvoice = () => {
     db.openMaintenanceInvoice(request.id);
     setShowInvoice(true);
+  };
+
+  // ---- إجراءات المراحل لكل شاشة دور ----
+  const handleConfirmParts = () => {
+    if (request.parts.length === 0 && !window.confirm('مفيش قطع غيار مسجلة على الطلب. تأكيد الإحالة للتنفيذ بدون قطع غيار؟')) return;
+    advanceStatus('in_progress');
+  };
+  const handleSendToReview = () => {
+    if (!workPerformedDraft.trim()) { onToast('اكتب الأعمال التي تم تنفيذها قبل الإرسال للمراجعة.'); return; }
+    db.updateMaintenanceRequest(request.id, { work_performed: workPerformedDraft, status: 'pending_review' });
+    onToast('تم إرسال الطلب لمراجعة مدير الصيانة.');
+  };
+  const handleReturnToExecution = () => {
+    const reason = (window.prompt('سبب إرجاع الطلب للتنفيذ:') || '').trim();
+    if (!reason) return;
+    const stamp = new Date().toISOString().split('T')[0];
+    const note = `\n[إرجاع من المراجعة ${stamp}: ${reason}]`;
+    db.updateMaintenanceRequest(request.id, { status: 'in_progress', work_performed: (request.work_performed || '') + note });
+    onToast('تم إرجاع الطلب للتنفيذ مع السبب.');
   };
 
   const statusIdx = STATUS_ORDER.indexOf(request.status);
@@ -348,13 +399,28 @@ function MaintenanceRequestDetail({ request, onToast }: { request: MaintenanceRe
 
         {/* تقدم الحالة */}
         <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-          {nextStatus && (
+          {mode === 'full' && nextStatus && (
             <button type="button" onClick={() => advanceStatus(nextStatus)} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3.5 py-2 rounded-lg">
               نقل الحالة إلى: {STATUS_LABELS[nextStatus]}
             </button>
           )}
-          {request.status !== 'closed' && request.invoice_id && (
+          {mode === 'parts' && request.status === 'pending_parts' && (
+            <button type="button" onClick={handleConfirmParts} className="bg-amber-500 hover:bg-amber-400 text-white font-bold text-xs px-3.5 py-2 rounded-lg">تأكيد قطع الغيار وإحالة الطلب للتنفيذ</button>
+          )}
+          {mode === 'execution' && request.status === 'in_progress' && (
+            <button type="button" onClick={handleSendToReview} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3.5 py-2 rounded-lg">إرسال الطلب للمراجعة</button>
+          )}
+          {mode === 'review' && request.status === 'pending_review' && (
+            <>
+              <button type="button" onClick={() => { advanceStatus('pending_invoice'); }} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg">اعتماد الطلب وإحالته للفواتير</button>
+              <button type="button" onClick={handleReturnToExecution} className="bg-rose-500 hover:bg-rose-400 text-white font-bold text-xs px-3.5 py-2 rounded-lg">إرجاع للتنفيذ بسبب</button>
+            </>
+          )}
+          {(mode === 'full' || mode === 'accounting') && request.status !== 'closed' && request.invoice_id && (
             <button type="button" onClick={() => advanceStatus('closed')} className="bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs px-3.5 py-2 rounded-lg">إغلاق الطلب</button>
+          )}
+          {mode !== 'full' && !isInboxItem && (
+            <p className="text-[11px] text-slate-400 italic">الطلب حاليًا في مرحلة "{STATUS_LABELS[request.status]}" — عرض فقط.</p>
           )}
         </div>
       </div>
@@ -362,7 +428,7 @@ function MaintenanceRequestDetail({ request, onToast }: { request: MaintenanceRe
       {/* قطع الغيار */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow p-5 space-y-3">
         <h4 className="font-extrabold text-slate-700 flex items-center gap-1.5"><Package className="w-4 h-4 text-amber-500" /> طلب قطع الغيار</h4>
-        <form onSubmit={handleAddPart} className="grid grid-cols-1 md:grid-cols-[1fr,160px,90px,auto] gap-2">
+        {canEditParts && <form onSubmit={handleAddPart} className="grid grid-cols-1 md:grid-cols-[1fr,160px,90px,auto] gap-2">
           <input type="text" placeholder="اسم القطعة" value={partName} onChange={(e) => setPartName(e.target.value)} className="p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-amber-500 text-slate-800 text-xs" />
           <select value={partSource} onChange={(e) => setPartSource(e.target.value as any)} className="p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-amber-500 text-slate-800 text-xs font-bold">
             <option value="company_stock">مخزن الشركة</option>
@@ -370,13 +436,13 @@ function MaintenanceRequestDetail({ request, onToast }: { request: MaintenanceRe
           </select>
           <input type="number" min="1" value={partQty} onChange={(e) => setPartQty(e.target.value)} className="p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-amber-500 text-slate-800 text-xs font-mono" />
           <button type="submit" className="bg-amber-500 hover:bg-amber-400 text-white font-bold text-xs px-3 py-2 rounded-lg flex items-center justify-center gap-1"><Plus className="w-3.5 h-3.5" /> إضافة</button>
-        </form>
+        </form>}
         <div className="space-y-1.5">
           {request.parts.map(p => (
             <div key={p.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2 text-xs">
               <span className="font-bold text-slate-700">{p.name}</span>
               <span className="text-slate-500">{p.source === 'company_stock' ? 'مخزن الشركة' : 'الورشة الخارجية'} × {p.quantity}</span>
-              <button type="button" onClick={() => db.deleteMaintenancePart(request.id, p.id)} className="text-rose-400 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
+              {canEditParts && <button type="button" onClick={() => db.deleteMaintenancePart(request.id, p.id)} className="text-rose-400 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>}
             </div>
           ))}
           {request.parts.length === 0 && <p className="text-[11px] text-slate-400 italic">لسه مفيش قطع غيار مطلوبة.</p>}
@@ -386,27 +452,33 @@ function MaintenanceRequestDetail({ request, onToast }: { request: MaintenanceRe
       {/* الأعمال المنفذة */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow p-5 space-y-2.5">
         <h4 className="font-extrabold text-slate-700 flex items-center gap-1.5"><Wrench className="w-4 h-4 text-indigo-500" /> الأعمال التي تم تنفيذها</h4>
-        <textarea rows={3} value={workPerformedDraft} onChange={(e) => setWorkPerformedDraft(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-500 text-slate-800 text-xs" />
-        <button type="button" onClick={handleSaveWorkPerformed} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3.5 py-2 rounded-lg flex items-center gap-1.5"><Save className="w-3.5 h-3.5" /> حفظ</button>
+        {canEditWork ? (
+          <>
+            <textarea rows={3} value={workPerformedDraft} onChange={(e) => setWorkPerformedDraft(e.target.value)} className="w-full p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-500 text-slate-800 text-xs" />
+            <button type="button" onClick={handleSaveWorkPerformed} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3.5 py-2 rounded-lg flex items-center gap-1.5"><Save className="w-3.5 h-3.5" /> حفظ</button>
+          </>
+        ) : (
+          <p className="text-xs text-slate-700 whitespace-pre-wrap bg-slate-50 rounded-lg p-3 min-h-[2.5rem]">{request.work_performed || <span className="text-slate-400 italic">لسه ماتسجلش أعمال منفذة.</span>}</p>
+        )}
       </div>
 
       {/* الفاتورة */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow p-5 space-y-3">
         <div className="flex items-center justify-between">
           <h4 className="font-extrabold text-slate-700 flex items-center gap-1.5"><Receipt className="w-4 h-4 text-emerald-500" /> فاتورة الصيانة</h4>
-          {!showInvoice && (
+          {!showInvoice && canHandleInvoice && (
             <button type="button" onClick={handleOpenInvoice} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-lg">فتح الفاتورة</button>
           )}
         </div>
-        {showInvoice && request.invoice_id && <MaintenanceInvoicePanel invoiceId={request.invoice_id} onToast={onToast} />}
-        {!showInvoice && <p className="text-[11px] text-slate-400 italic">الفاتورة لسه ماتفتحتش — هتتكوّن تلقائيًا من بنود قطع الغيار المسجلة فوق.</p>}
+        {showInvoice && request.invoice_id && <MaintenanceInvoicePanel invoiceId={request.invoice_id} onToast={onToast} readOnly={!canHandleInvoice} />}
+        {!showInvoice && <p className="text-[11px] text-slate-400 italic">{canHandleInvoice ? 'الفاتورة لسه ماتفتحتش — هتتكوّن تلقائيًا من بنود قطع الغيار المسجلة فوق.' : 'الفاتورة لسه ماتفتحتش.'}</p>}
       </div>
     </div>
   );
 }
 
 // ====== فاتورة الصيانة — قطع الغيار تلقائي من الطلب + المصنعية يدوي من المحاسب + خصم + صافي ======
-function MaintenanceInvoicePanel({ invoiceId, onToast }: { invoiceId: string; onToast: (t: string) => void }) {
+function MaintenanceInvoicePanel({ invoiceId, onToast, readOnly = false }: { invoiceId: string; onToast: (t: string) => void; readOnly?: boolean }) {
   const db = useDb();
   const invoice = db.maintenanceInvoices.find(i => i.id === invoiceId);
   const [laborDesc, setLaborDesc] = useState('');
@@ -415,7 +487,7 @@ function MaintenanceInvoicePanel({ invoiceId, onToast }: { invoiceId: string; on
   const [discountDraft, setDiscountDraft] = useState(invoice ? String(invoice.discount) : '0');
   // قاعدة إلزامية: الخصم المحاسبي واعتماد/صرف الفاتورة من اختصاص مدير الصيانة فقط — صلاحية
   // فرعية منفصلة عن مجرد الوصول لشاشة الصيانة نفسها
-  const canApproveDiscount = db.hasScreenPermission('maintenance_discount');
+  const canApproveDiscount = !readOnly && db.hasScreenPermission('maintenance_discount');
 
   if (!invoice) return null;
 
@@ -477,11 +549,11 @@ function MaintenanceInvoicePanel({ invoiceId, onToast }: { invoiceId: string; on
                 <td className="py-2 px-2.5 text-slate-500">{item.source ? (item.source === 'company_stock' ? 'مخزن الشركة' : 'الورشة الخارجية') : '-'}</td>
                 <td className="py-2 px-2.5 font-mono">{item.quantity}</td>
                 <td className="py-2 px-2.5">
-                  <input type="number" step="0.01" min="0" defaultValue={item.unit_price} onBlur={(e) => handleUpdateItemPrice(item.id, e.target.value)} className="w-20 p-1 rounded border border-slate-200 font-mono" />
+                  {readOnly ? <span className="font-mono">{item.unit_price}</span> : <input type="number" step="0.01" min="0" defaultValue={item.unit_price} onBlur={(e) => handleUpdateItemPrice(item.id, e.target.value)} className="w-20 p-1 rounded border border-slate-200 font-mono" />}
                 </td>
                 <td className="py-2 px-2.5 font-mono font-bold">{(item.total || 0).toLocaleString()}</td>
                 <td className="py-2 px-1 text-center">
-                  <button type="button" onClick={() => db.deleteMaintenanceInvoiceItem(invoice.id, item.id)} className="text-rose-400 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                  {!readOnly && <button type="button" onClick={() => db.deleteMaintenanceInvoiceItem(invoice.id, item.id)} className="text-rose-400 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>}
                 </td>
               </tr>
             ))}
@@ -489,12 +561,12 @@ function MaintenanceInvoicePanel({ invoiceId, onToast }: { invoiceId: string; on
         </table>
       </div>
 
-      <form onSubmit={handleAddLabor} className="grid grid-cols-1 md:grid-cols-[1fr,80px,110px,auto] gap-2">
+      {!readOnly && <form onSubmit={handleAddLabor} className="grid grid-cols-1 md:grid-cols-[1fr,80px,110px,auto] gap-2">
         <input type="text" placeholder="بند مصنعية (فك وتركيب، ضبط...)" value={laborDesc} onChange={(e) => setLaborDesc(e.target.value)} className="p-2 rounded-lg border border-slate-200 text-xs" />
         <input type="number" min="1" placeholder="كمية" value={laborQty} onChange={(e) => setLaborQty(e.target.value)} className="p-2 rounded-lg border border-slate-200 text-xs font-mono" />
         <input type="number" step="0.01" min="0" placeholder="السعر" value={laborPrice} onChange={(e) => setLaborPrice(e.target.value)} className="p-2 rounded-lg border border-slate-200 text-xs font-mono" />
         <button type="submit" className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-3 py-2 rounded-lg flex items-center justify-center gap-1"><Plus className="w-3.5 h-3.5" /> إضافة مصنعية</button>
-      </form>
+      </form>}
 
       <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 rounded-xl p-3">
         <div className="flex items-center gap-2 text-xs">
@@ -514,7 +586,7 @@ function MaintenanceInvoicePanel({ invoiceId, onToast }: { invoiceId: string; on
         <div className="text-sm font-black text-slate-800">صافي الفاتورة: <span className="font-mono text-emerald-600">{net.toLocaleString()} ج.م</span></div>
       </div>
 
-      {invoice.status !== 'paid' && (
+      {!readOnly && invoice.status !== 'paid' && (
         canApproveDiscount ? (
           <button type="button" onClick={handleAdvanceInvoiceStatus} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg">
             {invoice.status === 'draft' ? 'اعتماد الفاتورة' : 'تسجيل صرف الفاتورة'}
