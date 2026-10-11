@@ -48,6 +48,7 @@ import {
   Gauge,
   Wrench,
   Package,
+  ChevronDown,
   TrendingUp
 } from 'lucide-react';
 
@@ -68,6 +69,8 @@ function DashboardLayout() {
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance' | 'maintenance_requests' | 'maintenance_parts' | 'maintenance_execution' | 'maintenance_review' | 'maintenance_accounting' | 'vehicle_profitability'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // المجموعة المفتوحة حاليًا في القايمة الجانبية (واحدة بس مفتوحة في كل مرة)
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [showConsole, setShowConsole] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -160,6 +163,13 @@ function DashboardLayout() {
     },
   ];
 
+  // لما الشاشة النشطة تتغيّر (مثلًا بعد الدخول أو التحويل التلقائي) نفتح المجموعة اللي تحتها الشاشة دي
+  useEffect(() => {
+    const owner = navStructure.find(e => e.type === 'group' && e.items.some(i => i.id === activeTab));
+    if (owner && owner.type === 'group') setOpenGroup(owner.label);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans relative pb-16">
       
@@ -247,7 +257,7 @@ function DashboardLayout() {
           className={`lg:w-72 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col justify-between h-[80vh] shrink-0 sticky top-24 no-print transition-all duration-300 md:translate-x-0 ${isSidebarOpen ? 'fixed right-4 left-4 top-20 z-50 translate-x-0 bg-slate-900' : 'hidden lg:flex'}`}
           id="elbanna_sidebar"
         >
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-y-auto min-h-0">
             <div className="flex justify-end items-center lg:hidden border-b border-slate-800 pb-2">
               <button onClick={() => setIsSidebarOpen(false)} type="button" className="p-1 hover:bg-slate-800 rounded text-slate-400">
                 <X className="w-5 h-5" />
@@ -255,7 +265,7 @@ function DashboardLayout() {
             </div>
 
             <div className="space-y-1.5">
-              {navStructure.map((entry, idx) => {
+              {navStructure.map((entry) => {
                 if (entry.type === 'standalone') {
                   if (!allowedTabs.includes(entry.id)) return null;
                   const Icon = entry.icon;
@@ -275,34 +285,46 @@ function DashboardLayout() {
                   );
                 }
 
+                // الشاشات الفرعية اللي المستخدم معاه صلاحيتها بس — المجموعة الرئيسية بتظهر الأول دايمًا،
+                // وتحتها (لما تتفتح) الشاشات الفرعية المسموحة له
                 const visibleItems = entry.items.filter(item => allowedTabs.includes(item.id));
                 if (visibleItems.length === 0) return null;
                 const GroupIcon = entry.icon;
+                const isOpen = openGroup === entry.label;
+                const hasActiveChild = visibleItems.some(item => item.id === activeTab);
                 return (
-                  <div key={entry.label} className={idx > 0 ? 'pt-2' : ''}>
-                    <div className="px-3 pb-1 pt-1 flex items-center gap-1.5 text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">
-                      <GroupIcon className="w-3.5 h-3.5" />
-                      <span>{entry.label}</span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {visibleItems.map(item => {
-                        const Icon = item.icon;
-                        return (
-                          <button
-                            key={item.id}
-                            onClick={() => {
-                              setActiveTab(item.id);
-                              setIsSidebarOpen(false);
-                            }}
-                            type="button"
-                            className={`w-full text-right px-4 py-3 rounded-xl font-bold text-xs md:text-sm transition-all flex items-center gap-3 border ${activeTab === item.id ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'text-slate-405 hover:bg-slate-800 hover:text-slate-200 border-transparent'}`}
-                          >
-                            <Icon className={`w-4 h-4 ${activeTab === item.id ? 'text-emerald-400' : 'text-slate-500'}`} />
-                            <span>{item.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <div key={entry.label}>
+                    <button
+                      type="button"
+                      onClick={() => setOpenGroup(isOpen ? null : entry.label)}
+                      aria-expanded={isOpen}
+                      className={`w-full text-right px-4 py-3 rounded-xl font-bold text-xs md:text-sm transition-all flex items-center gap-3 border ${hasActiveChild && !isOpen ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : isOpen ? 'bg-slate-800 text-slate-100 border-slate-700' : 'text-slate-405 hover:bg-slate-800 hover:text-slate-200 border-transparent'}`}
+                    >
+                      <GroupIcon className={`w-4 h-4 ${hasActiveChild ? 'text-emerald-400' : 'text-slate-500'}`} />
+                      <span className="flex-1">{entry.label}</span>
+                      <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                    </button>
+                    {isOpen && (
+                      <div className="mt-1.5 mr-4 pr-2 border-r border-slate-700 space-y-1.5">
+                        {visibleItems.map(item => {
+                          const Icon = item.icon;
+                          return (
+                            <button
+                              key={item.id}
+                              onClick={() => {
+                                setActiveTab(item.id);
+                                setIsSidebarOpen(false);
+                              }}
+                              type="button"
+                              className={`w-full text-right px-3 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2.5 border ${activeTab === item.id ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'text-slate-405 hover:bg-slate-800 hover:text-slate-200 border-transparent'}`}
+                            >
+                              <Icon className={`w-4 h-4 ${activeTab === item.id ? 'text-emerald-400' : 'text-slate-500'}`} />
+                              <span>{item.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
