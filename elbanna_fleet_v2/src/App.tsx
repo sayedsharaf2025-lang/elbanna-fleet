@@ -47,6 +47,7 @@ import {
   Route,
   Gauge,
   Wrench,
+  Package,
   TrendingUp
 } from 'lucide-react';
 
@@ -65,7 +66,7 @@ function DashboardLayout() {
     return user.allowedScreens || [];
   }, [db.currentUser, db.systemUsers]);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance' | 'vehicle_profitability'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance' | 'maintenance_requests' | 'maintenance_parts' | 'maintenance_execution' | 'maintenance_review' | 'maintenance_accounting' | 'vehicle_profitability'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -144,6 +145,11 @@ function DashboardLayout() {
       type: 'group' as const, label: 'الصيانة', icon: Wrench,
       items: [
         { id: 'maintenance' as const, label: 'قسم الصيانة', icon: Wrench },
+        { id: 'maintenance_requests' as const, label: 'طلبات الصيانة', icon: ClipboardList },
+        { id: 'maintenance_parts' as const, label: 'قطع الغيار', icon: Package },
+        { id: 'maintenance_execution' as const, label: 'تنفيذ الصيانة', icon: Wrench },
+        { id: 'maintenance_review' as const, label: 'مراجعة واعتماد الصيانة', icon: CalendarCheck },
+        { id: 'maintenance_accounting' as const, label: 'فواتير الصيانة', icon: Receipt },
       ]
     },
     {
@@ -380,6 +386,11 @@ function DashboardLayout() {
             {activeTab === 'route_accounting' && <RouteAccountingTab />}
             {activeTab === 'car_daily_costs' && <CarDailyCostsTab />}
             {activeTab === 'maintenance' && <MaintenanceTab />}
+            {activeTab === 'maintenance_requests' && <MaintenanceTab mode="requests" />}
+            {activeTab === 'maintenance_parts' && <MaintenanceTab mode="parts" />}
+            {activeTab === 'maintenance_execution' && <MaintenanceTab mode="execution" />}
+            {activeTab === 'maintenance_review' && <MaintenanceTab mode="review" />}
+            {activeTab === 'maintenance_accounting' && <MaintenanceTab mode="accounting" />}
             {activeTab === 'vehicle_profitability' && <VehicleProfitabilityTab />}
           </div>
         </main>
