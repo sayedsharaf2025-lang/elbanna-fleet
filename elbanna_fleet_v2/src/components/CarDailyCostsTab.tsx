@@ -51,7 +51,7 @@ export function CarDailyCostsTab() {
   }, [db.transportRequests, db.cars, selectedDate]);
 
   const [drafts, setDrafts] = useState<Record<string, {
-    distance: string; cards: string; violations: string; tireWash: string; maintenance: string; extra: Record<string, string>;
+    distance: string; cards: string; violations: string; tireWash: string; extra: Record<string, string>;
   }>>({});
 
   const draftFor = (carId: string) => {
@@ -64,7 +64,6 @@ export function CarDailyCostsTab() {
       cards: existing ? String(existing.cards_amount) : '',
       violations: existing ? String(existing.violations_amount) : '',
       tireWash: existing ? String(existing.tire_wash_amount) : '',
-      maintenance: existing ? String(existing.maintenance_amount) : '',
       extra,
     };
   };
@@ -94,7 +93,8 @@ export function CarDailyCostsTab() {
       cards_amount: num(d.cards),
       violations_amount: num(d.violations),
       tire_wash_amount: num(d.tireWash),
-      maintenance_amount: num(d.maintenance),
+      // تكلفة الصيانة بتتحسب تلقائيًا في store.tsx من فواتير الصيانة الحقيقية — مش إدخال يدوي
+      maintenance_amount: 0,
       extra_costs,
     });
     showToast(`تم حفظ مصاريف السيارة في ${selectedDate} بنجاح.`);
@@ -119,7 +119,8 @@ export function CarDailyCostsTab() {
         cards_amount: existing?.cards_amount || 0,
         violations_amount: existing?.violations_amount || 0,
         tire_wash_amount: existing?.tire_wash_amount || 0,
-        maintenance_amount: existing?.maintenance_amount || 0,
+        // تكلفة الصيانة بتتحسب تلقائيًا في store.tsx من فواتير الصيانة الحقيقية
+        maintenance_amount: 0,
         extra_costs: existing?.extra_costs || [],
       });
       success++;
@@ -218,9 +219,12 @@ export function CarDailyCostsTab() {
                 </div>
                 <div>
                   <label className="block text-slate-500 font-bold mb-1 flex items-center gap-1"><Wrench className="w-3.5 h-3.5" /> صيانة</label>
-                  <input type="number" step="0.01" min="0" value={d.maintenance} onChange={(e) => updateDraft(car.id, { maintenance: e.target.value })} className="w-full p-2 rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-500 text-slate-800 font-mono" />
+                  <div className="p-2 rounded-lg border border-slate-100 bg-slate-50 text-slate-600 font-mono font-bold" title="بتتحسب تلقائيًا من فواتير الصيانة المعتمدة لنفس السيارة في نفس اليوم — مش إدخال يدوي">
+                    {db.getMaintenanceCostForCarDay(car.id, selectedDate).toLocaleString()} ج.م
+                  </div>
                 </div>
               </div>
+              <p className="text-[10px] text-slate-400 italic -mt-1">* تكلفة الصيانة بتُسحب تلقائيًا من فواتير قسم الصيانة المعتمدة لنفس السيارة/اليوم، مفيش إدخال يدوي ليها هنا (لمنع احتساب نفس التكلفة مرتين).</p>
 
               {db.costItemTypes.length > 0 && (
                 <div className="grid grid-cols-2 md:grid-cols-6 gap-2.5 text-xs pt-2 border-t border-slate-100">

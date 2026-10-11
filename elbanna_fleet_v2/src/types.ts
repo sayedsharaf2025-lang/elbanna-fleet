@@ -178,7 +178,7 @@ export interface CarDailyCost {
   cards_amount: number; // كارتات (يدوي)
   violations_amount: number; // مخالفات (يدوي)
   tire_wash_amount: number; // غسيل كاوتش (يدوي)
-  maintenance_amount: number; // صيانة (يدوي)
+  maintenance_amount: number; // صيانة — محسوبة تلقائيًا من فواتير قسم الصيانة الحقيقية (مش إدخال يدوي)، مخزّنة هنا كلقطة وقت آخر حفظ
   extra_costs: TransportRequestExtraCost[]; // أي بنود إضافية أخرى من الإعدادات
   updated_at: string;
   updated_by?: string;

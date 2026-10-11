@@ -332,8 +332,9 @@ export function RequestsTrackingTab() {
                         if (!r.execution_date) return null;
                         const daily = db.carDailyCosts.find(c => c.car_id === r.assigned_car_id && c.date === r.execution_date);
                         if (!daily) return <span className="text-slate-400 font-medium">🚛 نولون/مصاريف اليوم: لسه ماتسجلتش</span>;
+                        const maintenanceCost = db.getMaintenanceCostForCarDay(r.assigned_car_id!, r.execution_date);
                         const dayTotal = (daily.freight_amount || 0) + (daily.cards_amount || 0) + (daily.violations_amount || 0)
-                          + (daily.tire_wash_amount || 0) + (daily.maintenance_amount || 0)
+                          + (daily.tire_wash_amount || 0) + maintenanceCost
                           + (daily.extra_costs || []).reduce((sum, i) => sum + (i.amount || 0), 0);
                         return <span className="text-indigo-600">🚛 إجمالي مصاريف السيارة في {r.execution_date}: {dayTotal.toLocaleString()} ج.م</span>;
                       })()}

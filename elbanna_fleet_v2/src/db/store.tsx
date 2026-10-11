@@ -153,6 +153,7 @@ interface DbContextType {
   updateMaintenanceInvoice: (id: string, updatedFields: Partial<MaintenanceInvoice>) => void;
   addMaintenanceInvoiceItem: (invoiceId: string, item: { description: string; item_type: 'parts' | 'labor'; source?: 'company_stock' | 'external_workshop'; quantity: number; unit_price: number; total: number }) => void;
   deleteMaintenanceInvoiceItem: (invoiceId: string, itemId: string) => void;
+  getMaintenanceCostForCarDay: (carId: string, date: string) => number;
 
   // Real-time status simulation / State settings
   isRealtimeActive: boolean;
@@ -289,6 +290,7 @@ interface DbContextType {
   login: (username: string, role: 'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent', password?: string, officialId?: string) => Promise<{ success: boolean; error?: string }>;
   // تسجيل دخول موحّد بدون اختيار قسم مقدمًا — اسم مستخدم وكلمة مرور بس، والنظام يتعرف على الحساب تلقائيًا
   loginAuto: (identifier: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  hasScreenPermission: (screenId: string) => boolean;
   logout: () => void;
   adminPassword?: string;
   managerPassword?: string;
@@ -318,9 +320,9 @@ const DbContext = createContext<DbContextType | undefined>(undefined);
 // خريطة الصلاحيات الافتراضية للشاشات لكل رتبة — نفس القيم اللي كانت متثبتة (hardcoded) قبل كده
 // في App.tsx، وبقت دلوقتي قابلة للتعديل من شاشة "خريطة صلاحيات الشاشات"
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings', 'transport_cost_settings', 'route_accounting', 'car_daily_costs', 'maintenance'],
+  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings', 'transport_cost_settings', 'route_accounting', 'car_daily_costs', 'maintenance', 'maintenance_discount', 'vehicle_profitability'],
   supervisor: ['custody_licensing', 'license_tracking', 'reports'],
-  manager: ['reports', 'route_accounting', 'car_daily_costs'],
+  manager: ['reports', 'route_accounting', 'car_daily_costs', 'vehicle_profitability'],
   movement_supervisor: ['requests_tracking'],
   requests_agent: ['transport_requests'],
 };
@@ -749,6 +751,17 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   // تسجيل دخول موحّد بدون اختيار قسم/رتبة مقدمًا — يكتب المستخدم اسمه وكلمة المرور بس،
   // والنظام بيجرب يتعرف على نوع الحساب تلقائيًا (مشرف صرف بالاسم، أو أدمن/مدير/مشرف حركة/طلبات نقل باليوزرنيم)
+  // تحقق حي من صلاحية "شاشة" معينة للمستخدم الحالي — بنفس منطق allowedTabs في App.tsx تمامًا،
+  // لكن قابل لإعادة الاستخدام داخل أي شاشة محتاجة تتحقق من صلاحية فرعية (زي اعتماد خصم الصيانة)
+  // من غير ما تضطر تكرر نفس منطق البحث عن systemUser الحي في كل مكان
+  const hasScreenPermission = (screenId: string): boolean => {
+    const user = currentUser;
+    if (!user) return false;
+    const liveUser = systemUsers.find(u => u.id === user.systemUserId);
+    const screens = liveUser ? liveUser.allowed_screens : (user.allowedScreens || []);
+    return screens.includes(screenId);
+  };
+
   const loginAuto = async (identifier: string, password: string): Promise<{ success: boolean; error?: string }> => {
     const trimmed = identifier.trim();
     if (!trimmed) {
@@ -758,8 +771,29 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return { success: false, error: 'يرجى إدخال كلمة المرور' };
     }
 
+    // قبل أي حاجة، نجيب أحدث نسخة من جدول المستخدمين من السحابة مباشرة (مش معتمدين على النسخة
+    // المحفوظة محليًا من وقت فتح الصفحة) — عشان لو حد غيّر اسم مستخدم أو باسورد أو شاشات من
+    // جهاز تاني، يتفعّل التغيير فورًا هنا من غير ما يستنى أول مزامنة عامة للتطبيق
+    let latestSystemUsers = systemUsers;
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('system_settings').select('value').eq('key', 'system_users').maybeSingle();
+        if (!error && data?.value) {
+          const parsed = JSON.parse(data.value);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            latestSystemUsers = mergeNewScreensIntoAdminUser(parsed);
+            setSystemUsers(latestSystemUsers);
+            localStorage.setItem('elbanna_system_users', JSON.stringify(latestSystemUsers));
+          }
+        }
+      } catch (e) {
+        console.warn("Fetch fresh system_users at login error (falling back to local copy):", e);
+      }
+    }
+
     // المصدر الوحيد للدخول دلوقتي: جدول المستخدمين الموحّد — مفيش ارتباط بقسم أو رتبة ثابتة
-    const matched = systemUsers.find(u => u.username.trim().toLowerCase() === trimmed.toLowerCase() && u.password === password);
+    const matched = latestSystemUsers.find(u => u.username.trim().toLowerCase() === trimmed.toLowerCase() && u.password === password);
     if (matched) {
       const uObj: User = {
         username: matched.username,
@@ -1246,6 +1280,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       car_id: carId,
       date: normalizedDate,
       ...data,
+      // تكلفة الصيانة دايمًا بتتحسب حيًّا من فواتير الصيانة الحقيقية لنفس السيارة/اليوم — مش
+      // رقم يدوي، عشان ميتحسبش مرتين (قرار المراجعة بتاريخ اعتماد خطة إعادة الهيكلة)
+      maintenance_amount: getMaintenanceCostForCarDay(carId, normalizedDate),
       updated_at: new Date().toISOString(),
       updated_by: currentUser?.name || currentUser?.username,
     };
@@ -2438,7 +2475,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
       supabase.from('maintenance_requests').insert([newRequest]).then(({ error }) => {
-        if (error) console.error("Supabase insert maintenance_request error:", error);
+        if (error) {
+          console.error("Supabase insert maintenance_request error:", error);
+          // طلب الصيانة ده هيفضل ظاهر على الجهاز ده بس (محفوظ محليًا) ومش هيتزامن مع باقي
+          // الأجهزة لحد ما تتصلح المشكلة — لازم تنبيه واضح بدل ما يفشل بصمت وتختلف البيانات
+          // بين الأجهزة من غير ما حد يلاحظ
+          alert(`تنبيه: تم حفظ طلب الصيانة على هذا الجهاز فقط، وفشل حفظه في قاعدة البيانات السحابية بسبب: ${error.message}\nمعنى ده إن الطلب مش هيظهر على باقي الأجهزة لحد ما تتصلح المشكلة. على الأغلب السبب إن جدول "maintenance_requests" لسه مش منشأ في قاعدة البيانات — افتح شاشة "الاتصال السحابي"، انسخ "مخطط إنشاء الجداول (SQL Schema)" بالكامل، وشغّله مرة واحدة في SQL Editor بتاع Supabase.`);
+        }
       });
     }
     return newRequest;
@@ -2514,7 +2557,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
       supabase.from('maintenance_invoices').insert([newInvoice]).then(({ error }) => {
-        if (error) console.error("Supabase insert maintenance_invoice error:", error);
+        if (error) {
+          console.error("Supabase insert maintenance_invoice error:", error);
+          alert(`تنبيه: تم فتح فاتورة الصيانة على هذا الجهاز فقط، وفشل حفظها في قاعدة البيانات السحابية بسبب: ${error.message}\nمعنى ده إن الفاتورة مش هتظهر على باقي الأجهزة لحد ما تتصلح المشكلة. على الأغلب السبب إن جدول "maintenance_invoices" لسه مش منشأ في قاعدة البيانات — افتح شاشة "الاتصال السحابي"، انسخ "مخطط إنشاء الجداول (SQL Schema)" بالكامل، وشغّله مرة واحدة في SQL Editor بتاع Supabase.`);
+        }
       });
     }
     return newInvoice;
@@ -2535,6 +2581,18 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (!inv) return;
     const newItem: MaintenanceInvoiceItem = { ...item, id: generateId('mii') };
     updateMaintenanceInvoice(invoiceId, { items: [...inv.items, newItem] });
+  };
+
+  // المصدر الوحيد لتكلفة الصيانة الفعلية لسيارة معينة في تاريخ معين — بيُحسب حيًّا من فواتير
+  // الصيانة الحقيقية (قطع غيار + مصنعية − خصم)، بدل ما يتسجل رقم يدوي منفصل في المصاريف
+  // اليومية، عشان نمنع احتساب نفس تكلفة الصيانة مرتين في حساب ربحية السيارة (حسب قرار المراجعة)
+  const getMaintenanceCostForCarDay = (carId: string, date: string): number => {
+    return maintenanceInvoices
+      .filter(inv => inv.car_id === carId && inv.invoice_date === date && inv.status !== 'draft')
+      .reduce((sum, inv) => {
+        const itemsTotal = inv.items.reduce((s, it) => s + (it.total || 0), 0);
+        return sum + (itemsTotal - (inv.discount || 0));
+      }, 0);
   };
 
   const deleteMaintenanceInvoiceItem = (invoiceId: string, itemId: string) => {
@@ -4389,6 +4447,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         updateMaintenanceInvoice,
         addMaintenanceInvoiceItem,
         deleteMaintenanceInvoiceItem,
+        getMaintenanceCostForCarDay,
         isRealtimeActive,
         setRealtimeActive,
         latencyMs,
@@ -4467,6 +4526,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         currentUser,
         login,
         loginAuto,
+        hasScreenPermission,
         logout,
         adminPassword,
         managerPassword,

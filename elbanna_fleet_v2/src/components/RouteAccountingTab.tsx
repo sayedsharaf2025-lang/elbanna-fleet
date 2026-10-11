@@ -101,8 +101,11 @@ export function RouteAccountingTab() {
     const smoke = g.requests.reduce((s, r) => s + smokeTotalFor(r.id), 0);
     const daily = dailyCostFor(g.carId, g.date);
     const freight = daily?.freight_amount || 0;
-    const others = daily ? (daily.cards_amount || 0) + (daily.violations_amount || 0) + (daily.tire_wash_amount || 0) + (daily.maintenance_amount || 0)
-      + (daily.extra_costs || []).reduce((s, i) => s + (i.amount || 0), 0) : 0;
+    // تكلفة الصيانة دايمًا حية من فواتير الصيانة الفعلية، بغض النظر عن وجود سجل مصاريف يومية
+    // من عدمه — مش معتمدة على حفظ شاشة المصاريف اليومية (مصدر واحد، بدون ازدواج)
+    const maintenanceCost = db.getMaintenanceCostForCarDay(g.carId, g.date);
+    const others = (daily ? (daily.cards_amount || 0) + (daily.violations_amount || 0) + (daily.tire_wash_amount || 0)
+      + (daily.extra_costs || []).reduce((s, i) => s + (i.amount || 0), 0) : 0) + maintenanceCost;
     return { smoke, freight, others, grand: smoke + freight + others, hasDaily: !!daily, distance: daily?.total_distance_km || 0 };
   };
 

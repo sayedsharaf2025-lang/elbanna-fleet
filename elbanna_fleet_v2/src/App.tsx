@@ -22,6 +22,7 @@ import { TransportCostSettingsTab } from './components/TransportCostSettingsTab'
 import { RouteAccountingTab } from './components/RouteAccountingTab';
 import { CarDailyCostsTab } from './components/CarDailyCostsTab';
 import { MaintenanceTab } from './components/MaintenanceTab';
+import { VehicleProfitabilityTab } from './components/VehicleProfitabilityTab';
 import {
   LayoutDashboard,
   Truck,
@@ -45,7 +46,8 @@ import {
   Fuel,
   Route,
   Gauge,
-  Wrench
+  Wrench,
+  TrendingUp
 } from 'lucide-react';
 
 function DashboardLayout() {
@@ -63,7 +65,7 @@ function DashboardLayout() {
     return user.allowedScreens || [];
   }, [db.currentUser, db.systemUsers]);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance' | 'vehicle_profitability'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -106,9 +108,10 @@ function DashboardLayout() {
   }, [db.currentUser]);
 
   // هيكل التنقل: شاشتين مستقلتين (الرئيسية والتقارير) + أربع مجموعات رئيسية تحوي باقي الشاشات
+  // أعيد تنظيمها على الأقسام الخمسة المعتمدة في مستند المراجعة (الإعدادات / العمليات / المالية /
+  // الصيانة / التقارير العامة) — نقل تنظيمي بس، كل الشاشات نفسها زي ما هي من غير حذف أو دمج
   const navStructure = [
     { type: 'standalone' as const, id: 'dashboard' as const, label: 'لوحة التحكم والتحليلات الحية', icon: LayoutDashboard },
-    { type: 'standalone' as const, id: 'transport_requests' as const, label: 'طلبات النقل', icon: Send },
     {
       type: 'group' as const, label: 'الإعدادات', icon: Settings,
       items: [
@@ -118,25 +121,37 @@ function DashboardLayout() {
       ]
     },
     {
-      type: 'group' as const, label: 'الحركة', icon: Activity,
+      type: 'group' as const, label: 'العمليات / حركة الأسطول', icon: Activity,
       items: [
-        { id: 'violations' as const, label: 'تسجيل المخالفات وتفادي التكرار', icon: AlertTriangle },
+        { id: 'transport_requests' as const, label: 'طلبات النقل', icon: Send },
         { id: 'requests_tracking' as const, label: 'متابعة الطلبات', icon: ClipboardList },
         { id: 'license_tracking' as const, label: 'متابعة وتحديث التراخيص المتقدمة', icon: CalendarCheck },
-        { id: 'custody_licensing' as const, label: 'فواتير تراخيص', icon: Receipt },
+        { id: 'violations' as const, label: 'تسجيل المخالفات وتفادي التكرار', icon: AlertTriangle },
       ]
     },
     {
       type: 'group' as const, label: 'المالية', icon: CreditCard,
       items: [
-        { id: 'deductions' as const, label: 'الخصومات الفردية والجماعية', icon: CreditCard },
-        { id: 'cross_accounts' as const, label: 'أرشيف وحسابات السائقين (شهرية)', icon: FileSpreadsheet },
         { id: 'route_accounting' as const, label: 'حساب خطوط السير', icon: Route },
         { id: 'car_daily_costs' as const, label: 'مصاريف وأرباح السيارات اليومية', icon: Gauge },
+        { id: 'vehicle_profitability' as const, label: 'ربحية السيارات', icon: TrendingUp },
+        { id: 'custody_licensing' as const, label: 'فواتير تراخيص', icon: Receipt },
+        { id: 'deductions' as const, label: 'الخصومات الفردية والجماعية', icon: CreditCard },
+        { id: 'cross_accounts' as const, label: 'أرشيف وحسابات السائقين (شهرية)', icon: FileSpreadsheet },
       ]
     },
-    { type: 'standalone' as const, id: 'maintenance' as const, label: 'قسم الصيانة', icon: Wrench },
-    { type: 'standalone' as const, id: 'reports' as const, label: 'شاشة التقارير والمطبوعات الموحدة', icon: FileText },
+    {
+      type: 'group' as const, label: 'الصيانة', icon: Wrench,
+      items: [
+        { id: 'maintenance' as const, label: 'قسم الصيانة', icon: Wrench },
+      ]
+    },
+    {
+      type: 'group' as const, label: 'التقارير العامة', icon: FileText,
+      items: [
+        { id: 'reports' as const, label: 'شاشة التقارير والمطبوعات الموحدة', icon: FileText },
+      ]
+    },
   ];
 
   return (
@@ -365,6 +380,7 @@ function DashboardLayout() {
             {activeTab === 'route_accounting' && <RouteAccountingTab />}
             {activeTab === 'car_daily_costs' && <CarDailyCostsTab />}
             {activeTab === 'maintenance' && <MaintenanceTab />}
+            {activeTab === 'vehicle_profitability' && <VehicleProfitabilityTab />}
           </div>
         </main>
 

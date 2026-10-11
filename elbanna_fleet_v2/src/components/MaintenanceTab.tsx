@@ -413,6 +413,9 @@ function MaintenanceInvoicePanel({ invoiceId, onToast }: { invoiceId: string; on
   const [laborQty, setLaborQty] = useState('1');
   const [laborPrice, setLaborPrice] = useState('');
   const [discountDraft, setDiscountDraft] = useState(invoice ? String(invoice.discount) : '0');
+  // قاعدة إلزامية: الخصم المحاسبي واعتماد/صرف الفاتورة من اختصاص مدير الصيانة فقط — صلاحية
+  // فرعية منفصلة عن مجرد الوصول لشاشة الصيانة نفسها
+  const canApproveDiscount = db.hasScreenPermission('maintenance_discount');
 
   if (!invoice) return null;
 
@@ -434,6 +437,7 @@ function MaintenanceInvoicePanel({ invoiceId, onToast }: { invoiceId: string; on
   };
 
   const handleSaveDiscount = () => {
+    if (!canApproveDiscount) return;
     db.updateMaintenanceInvoice(invoice.id, { discount: num(discountDraft) });
     onToast('تم حفظ الخصم.');
   };
@@ -442,6 +446,7 @@ function MaintenanceInvoicePanel({ invoiceId, onToast }: { invoiceId: string; on
   const net = subtotal - (invoice.discount || 0);
 
   const handleAdvanceInvoiceStatus = () => {
+    if (!canApproveDiscount) return;
     const next = invoice.status === 'draft' ? 'approved' : 'paid';
     db.updateMaintenanceInvoice(invoice.id, { status: next });
     onToast(next === 'approved' ? 'تم اعتماد الفاتورة.' : 'تم تسجيل صرف الفاتورة.');
@@ -494,17 +499,29 @@ function MaintenanceInvoicePanel({ invoiceId, onToast }: { invoiceId: string; on
       <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 rounded-xl p-3">
         <div className="flex items-center gap-2 text-xs">
           <span className="font-bold text-slate-500">الخصم:</span>
-          <input type="number" step="0.01" min="0" value={discountDraft} onChange={(e) => setDiscountDraft(e.target.value)} className="w-24 p-1.5 rounded border border-slate-200 font-mono" />
-          <button type="button" onClick={handleSaveDiscount} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2.5 py-1.5 rounded text-[10px]">حفظ</button>
+          {canApproveDiscount ? (
+            <>
+              <input type="number" step="0.01" min="0" value={discountDraft} onChange={(e) => setDiscountDraft(e.target.value)} className="w-24 p-1.5 rounded border border-slate-200 font-mono" />
+              <button type="button" onClick={handleSaveDiscount} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-2.5 py-1.5 rounded text-[10px]">حفظ</button>
+            </>
+          ) : (
+            <span className="font-mono font-bold text-slate-700" title="اعتماد وتعديل الخصم المحاسبي من اختصاص مدير الصيانة فقط">
+              {(invoice.discount || 0).toLocaleString()} ج.م 🔒
+            </span>
+          )}
         </div>
         <div className="text-xs text-slate-500">الإجمالي: <span className="font-mono font-bold text-slate-700">{subtotal.toLocaleString()}</span></div>
         <div className="text-sm font-black text-slate-800">صافي الفاتورة: <span className="font-mono text-emerald-600">{net.toLocaleString()} ج.م</span></div>
       </div>
 
       {invoice.status !== 'paid' && (
-        <button type="button" onClick={handleAdvanceInvoiceStatus} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg">
-          {invoice.status === 'draft' ? 'اعتماد الفاتورة' : 'تسجيل صرف الفاتورة'}
-        </button>
+        canApproveDiscount ? (
+          <button type="button" onClick={handleAdvanceInvoiceStatus} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg">
+            {invoice.status === 'draft' ? 'اعتماد الفاتورة' : 'تسجيل صرف الفاتورة'}
+          </button>
+        ) : (
+          <p className="text-[10px] text-slate-400 italic">اعتماد الفاتورة (والصرف بعد كده) من اختصاص مدير الصيانة فقط.</p>
+        )
       )}
     </div>
   );

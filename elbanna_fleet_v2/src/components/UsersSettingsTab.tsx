@@ -30,7 +30,9 @@ const ALL_SCREENS: { id: string; label: string }[] = [
   { id: 'cross_accounts', label: 'أرشيف وحسابات السائقين (شهرية)' },
   { id: 'route_accounting', label: 'حساب خطوط السير' },
   { id: 'car_daily_costs', label: 'مصاريف وأرباح السيارات اليومية' },
+  { id: 'vehicle_profitability', label: 'ربحية السيارات' },
   { id: 'maintenance', label: 'قسم الصيانة' },
+  { id: 'maintenance_discount', label: 'الصيانة — اعتماد الخصم المحاسبي' },
   { id: 'reports', label: 'شاشة التقارير والمطبوعات الموحدة' },
 ];
 
