@@ -1308,6 +1308,104 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const isDownloadingRef = useRef(false);
   const isFirstMountRef = useRef(true);
 
+  // ===== سجل المحذوفات (Tombstones) =====
+  // أي سجل بيتحذف محليًا بنسجل الـ id بتاعه هنا ونرفعه للسحابة (system_settings / deleted_ids).
+  // كده أي جهاز/متصفح فيه نسخة قديمة مش هيقدر يرجّع السجل المحذوف تاني، لا عند التحميل ولا عند الرفع.
+  const TOMBSTONE_KEY = 'elbanna_deleted_ids_v1';
+  // ترتيب الحذف من السحابة (الأبناء قبل الآباء)
+  const PURGE_ORDER = ['invoice_items', 'driver_account_movements', 'violations', 'custody_movements', 'custody_accounts', 'maintenance_invoices', 'maintenance_requests', 'transport_requests', 'invoices', 'cars', 'drivers', 'officials'];
+  const readTombstones = (): Record<string, string[]> => {
+    try {
+      const raw = localStorage.getItem(TOMBSTONE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch { return {}; }
+  };
+  const tombstonesRef = useRef<Record<string, string[]>>(readTombstones());
+  const prevIdsRef = useRef<Record<string, Set<string>> | null>(null);
+
+  const saveTombstones = (t: Record<string, string[]>) => {
+    tombstonesRef.current = t;
+    try { localStorage.setItem(TOMBSTONE_KEY, JSON.stringify(t)); } catch (e) { console.warn('tombstones save error', e); }
+  };
+  const notDeleted = <T extends { id: string }>(table: string, rows: T[]): T[] => {
+    const ids = tombstonesRef.current[table];
+    if (!ids || ids.length === 0) return rows;
+    const set = new Set(ids);
+    return rows.filter(r => !set.has(r.id));
+  };
+  const pushTombstonesToCloud = async () => {
+    const client = getSupabaseClient();
+    if (!client) return;
+    try {
+      const { error } = await client.from('system_settings').upsert({ key: 'deleted_ids', value: JSON.stringify(tombstonesRef.current) });
+      if (error) console.warn('push tombstones error:', error.message);
+    } catch (e) { console.warn('push tombstones exception:', e); }
+  };
+  // حذف فعلي من السحابة مع فحص الخطأ (الحذف بيتعاد تلقائيًا في كل فتح للموقع لو فشل)
+  const purgeCloudRows = async (byTable: Record<string, string[]>) => {
+    const client = getSupabaseClient();
+    if (!client) return;
+    for (const table of PURGE_ORDER) {
+      const ids = byTable[table];
+      if (!ids || ids.length === 0) continue;
+      for (let i = 0; i < ids.length; i += 100) {
+        try {
+          const { error } = await client.from(table).delete().in('id', ids.slice(i, i + 100));
+          if (error) console.warn(`purge ${table} error:`, error.message);
+        } catch (e) { console.warn(`purge ${table} exception:`, e); }
+      }
+    }
+  };
+
+  // رصد أي سجل اختفى من الحالة (حذف) وتسجيله + حذفه من السحابة
+  useEffect(() => {
+    const current: Record<string, { id: string }[]> = {
+      drivers, officials, cars, violations, invoices,
+      invoice_items: invoiceItems,
+      driver_account_movements: movements,
+      custody_accounts: custodyAccounts,
+      custody_movements: custodyMovements,
+      transport_requests: transportRequests,
+      maintenance_requests: maintenanceRequests,
+      maintenance_invoices: maintenanceInvoices
+    };
+    const nextIds: Record<string, Set<string>> = {};
+    Object.keys(current).forEach(t => { nextIds[t] = new Set(current[t].map(r => r.id)); });
+    const prev = prevIdsRef.current;
+    prevIdsRef.current = nextIds;
+    if (!prev) return;
+
+    const t: Record<string, string[]> = { ...tombstonesRef.current };
+    const removedByTable: Record<string, string[]> = {};
+    let changed = false;
+    Object.keys(nextIds).forEach(table => {
+      const p = prev[table]; const n = nextIds[table];
+      if (!p || !n) return;
+      const removed = [...p].filter(id => !n.has(id));
+      const added = [...n].filter(id => !p.has(id));
+      let list = t[table] || [];
+      if (added.length && list.length) {
+        const addedSet = new Set(added);
+        const next = list.filter(id => !addedSet.has(id));
+        if (next.length !== list.length) { list = next; changed = true; }
+      }
+      if (removed.length) {
+        list = Array.from(new Set([...list, ...removed]));
+        removedByTable[table] = removed;
+        changed = true;
+      }
+      if (list.length > 5000) list = list.slice(-5000);
+      t[table] = list;
+    });
+    if (!changed) return;
+    saveTombstones(t);
+    (async () => {
+      await pushTombstonesToCloud();
+      await purgeCloudRows(removedByTable);
+    })();
+  }, [drivers, officials, cars, violations, invoices, invoiceItems, movements, custodyAccounts, custodyMovements, transportRequests, maintenanceRequests, maintenanceInvoices]);
+
   // Persist store state in local storage (local backup)
   useEffect(() => {
     localStorage.setItem('elbanna_drivers', JSON.stringify(drivers));
@@ -1551,6 +1649,46 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return { success: false, message: `فشل جلب بعض الجداول السحابية: ${mainErrorMsg}` };
       }
 
+      // ===== تطبيق سجل المحذوفات: دمج المحذوفات السحابية مع المحلية ثم استبعادها =====
+      try {
+        const { data: tsRow } = await supabase.from('system_settings').select('value').eq('key', 'deleted_ids').maybeSingle();
+        if (tsRow?.value) {
+          const cloudT = JSON.parse(tsRow.value) as Record<string, string[]>;
+          const merged: Record<string, string[]> = { ...tombstonesRef.current };
+          Object.keys(cloudT || {}).forEach(tb => {
+            merged[tb] = Array.from(new Set([...(merged[tb] || []), ...(cloudT[tb] || [])]));
+          });
+          saveTombstones(merged);
+        }
+      } catch (e) { console.warn('load tombstones error', e); }
+
+      const staleCloud: Record<string, string[]> = {};
+      const stripDeleted = (table: string, res: any) => {
+        const ids = tombstonesRef.current[table];
+        if (!res?.data || !ids || ids.length === 0) return;
+        const set = new Set(ids);
+        const stale = res.data.filter((r: any) => set.has(r.id)).map((r: any) => r.id);
+        if (stale.length > 0) {
+          staleCloud[table] = stale;
+          res.data = res.data.filter((r: any) => !set.has(r.id));
+        }
+      };
+      stripDeleted('drivers', resDrivers);
+      stripDeleted('officials', resOfficials);
+      stripDeleted('cars', resCars);
+      stripDeleted('violations', resViolations);
+      stripDeleted('invoices', resInvoices);
+      stripDeleted('invoice_items', resItems);
+      stripDeleted('driver_account_movements', resMovements);
+      stripDeleted('custody_accounts', resCustodyAccs);
+      stripDeleted('custody_movements', resCustodyMovs);
+      stripDeleted('transport_requests', resTransportRequests);
+      stripDeleted('maintenance_requests', resMaintenanceRequests);
+      stripDeleted('maintenance_invoices', resMaintenanceInvoices);
+      if (Object.keys(staleCloud).length > 0) {
+        purgeCloudRows(staleCloud); // تنظيف السحابة من السجلات المحذوفة سابقًا
+      }
+
       // Check if all cloud tables fetched successfully and are empty
       const isDownloadedEmpty = 
         (!resDrivers.data || resDrivers.data.length === 0) &&
@@ -1590,33 +1728,33 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const cloudDrivers = resDrivers.data;
         const cloudIds = new Set(cloudDrivers.map(d => d.id));
         const cloudCodes = new Set(cloudDrivers.map(d => d.driver_code));
-        const localOnly = drivers.filter(d => !cloudIds.has(d.id) && !cloudCodes.has(d.driver_code));
+        const localOnly = notDeleted('drivers', drivers).filter(d => !cloudIds.has(d.id) && !cloudCodes.has(d.driver_code));
         setDrivers([...cloudDrivers, ...localOnly]);
       }
       if (resOfficials.data) {
         const cloudOfficials = resOfficials.data;
         const cloudIds = new Set(cloudOfficials.map(o => o.id));
-        const localOnly = officials.filter(o => !cloudIds.has(o.id));
+        const localOnly = notDeleted('officials', officials).filter(o => !cloudIds.has(o.id));
         setOfficials([...cloudOfficials, ...localOnly]);
       }
       if (resCars.data) {
         const cloudCars = resCars.data;
         const cloudIds = new Set(cloudCars.map(c => c.id));
         const cloudNumbers = new Set(cloudCars.map(c => c.car_number));
-        const localOnly = cars.filter(c => !cloudIds.has(c.id) && !cloudNumbers.has(c.car_number));
+        const localOnly = notDeleted('cars', cars).filter(c => !cloudIds.has(c.id) && !cloudNumbers.has(c.car_number));
         setCars([...cloudCars, ...localOnly]);
       }
       if (resViolations.data) {
         const cloudViolations = resViolations.data.map(v => ({ ...v, violation_date: normalizeDateToYmd(v.violation_date) }));
         const cloudIds = new Set(cloudViolations.map(v => v.id));
-        const localOnly = violations.filter(v => !cloudIds.has(v.id));
+        const localOnly = notDeleted('violations', violations).filter(v => !cloudIds.has(v.id));
         setViolations([...cloudViolations, ...localOnly]);
       }
       if (resInvoices.data) {
         const cloudInvoices = resInvoices.data;
         const cloudIds = new Set(cloudInvoices.map(i => i.id));
         const cloudNumbers = new Set(cloudInvoices.map(i => i.invoice_number));
-        const localOnly = invoices.filter(i => !cloudIds.has(i.id) && !cloudNumbers.has(i.invoice_number));
+        const localOnly = notDeleted('invoices', invoices).filter(i => !cloudIds.has(i.id) && !cloudNumbers.has(i.invoice_number));
         setInvoices([...cloudInvoices, ...localOnly]);
       }
       if (resItems.data) {
@@ -1628,7 +1766,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         // الحل: لو الفاتورة نفسها موجودة بالفعل في السحابة، نعتبر قائمة بنودها في السحابة هي المرجع
         // الوحيد لها، ونحتفظ بالبنود المحلية بس لو خاصة بفاتورة لسه مارفعتش للسحابة أصلاً.
         const cloudInvoiceIds = new Set((resInvoices.data || []).map((i: any) => i.id));
-        const localOnly = invoiceItems.filter(i => !cloudItemIds.has(i.id) && !cloudInvoiceIds.has(i.invoice_id));
+        const localOnly = notDeleted('invoice_items', invoiceItems).filter(i => !cloudItemIds.has(i.id) && !cloudInvoiceIds.has(i.invoice_id));
         setInvoiceItems([...sorted, ...localOnly]);
       }
       if (resLogs.data) {
@@ -1640,7 +1778,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       if (resMovements.data) {
         const cloudMovements = resMovements.data.map(m => ({ ...m, date: normalizeDateToYmd(m.date) }));
         const cloudIds = new Set(cloudMovements.map(m => m.id));
-        const localOnly = movements.filter(m => !cloudIds.has(m.id));
+        const localOnly = notDeleted('driver_account_movements', movements).filter(m => !cloudIds.has(m.id));
         setMovements([...cloudMovements, ...localOnly]);
 
         // رفع الحركات المحلية الغائبة عن السحابة تلقائياً
@@ -1659,31 +1797,31 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       if (resCustodyAccs.data) {
         const cloudAccs = resCustodyAccs.data;
         const cloudIds = new Set(cloudAccs.map(a => a.id));
-        const localOnly = custodyAccounts.filter(a => !cloudIds.has(a.id));
+        const localOnly = notDeleted('custody_accounts', custodyAccounts).filter(a => !cloudIds.has(a.id));
         setCustodyAccounts([...cloudAccs, ...localOnly]);
       }
       if (resCustodyMovs.data) {
         const cloudMovs = resCustodyMovs.data;
         const cloudIds = new Set(cloudMovs.map(m => m.id));
-        const localOnly = custodyMovements.filter(m => !cloudIds.has(m.id));
+        const localOnly = notDeleted('custody_movements', custodyMovements).filter(m => !cloudIds.has(m.id));
         setCustodyMovements([...cloudMovs, ...localOnly]);
       }
       if (resTransportRequests.data) {
         const cloudRequests = resTransportRequests.data;
         const cloudIds = new Set(cloudRequests.map((r: any) => r.id));
-        const localOnly = transportRequests.filter(r => !cloudIds.has(r.id));
+        const localOnly = notDeleted('transport_requests', transportRequests).filter(r => !cloudIds.has(r.id));
         setTransportRequests([...cloudRequests, ...localOnly]);
       }
       if (resMaintenanceRequests.data) {
         const cloudReqs = resMaintenanceRequests.data;
         const cloudIds = new Set(cloudReqs.map((r: any) => r.id));
-        const localOnly = maintenanceRequests.filter(r => !cloudIds.has(r.id));
+        const localOnly = notDeleted('maintenance_requests', maintenanceRequests).filter(r => !cloudIds.has(r.id));
         setMaintenanceRequests([...cloudReqs, ...localOnly]);
       }
       if (resMaintenanceInvoices.data) {
         const cloudInvs = resMaintenanceInvoices.data;
         const cloudIds = new Set(cloudInvs.map((i: any) => i.id));
-        const localOnly = maintenanceInvoices.filter(i => !cloudIds.has(i.id));
+        const localOnly = notDeleted('maintenance_invoices', maintenanceInvoices).filter(i => !cloudIds.has(i.id));
         setMaintenanceInvoices([...cloudInvs, ...localOnly]);
       }
 
@@ -2053,7 +2191,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     try {
       const processedNatIds = new Set<string>();
       const processedCodes = new Set<string>();
-      const sanitizedDrivers = drivers.map((d, index) => {
+      const sanitizedDrivers = notDeleted('drivers', drivers).map((d, index) => {
         let natId = (d.national_id || "").trim();
         let code = (d.driver_code || "").trim();
 
@@ -2083,7 +2221,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
       const processedCarNumbers = new Set<string>();
       const processedChassisNumbers = new Set<string>();
-      const sanitizedCars = cars.map((c, index) => {
+      const sanitizedCars = notDeleted('cars', cars).map((c, index) => {
         let carNum = (c.car_number || "").trim();
         let chassis = (c.chassis_number || "").trim();
 
@@ -2108,13 +2246,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         };
       });
 
-      const sanitizedViolations = violations.map(v => ({
+      const sanitizedViolations = notDeleted('violations', violations).map(v => ({
         ...v,
         violation_date: sanitizeDateStr(v.violation_date, "2026-06-07")
       }));
 
       const processedInvoiceNumbers = new Set<string>();
-      const sanitizedInvoices = invoices.map((inv, index) => {
+      const sanitizedInvoices = notDeleted('invoices', invoices).map((inv, index) => {
         let invNum = (inv.invoice_number || "").trim();
         if (invNum === "" || processedInvoiceNumbers.has(invNum)) {
           invNum = `INV-GEN-${Date.now()}-${index}`.slice(0, 30);
@@ -2133,36 +2271,40 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         timestamp: sanitizeTimestampStr(l.timestamp)
       }));
 
-      const sanitizedMovements = movements.map(cm => ({
+      const sanitizedMovements = notDeleted('driver_account_movements', movements).map(cm => ({
         ...cm,
         date: sanitizeDateStr(cm.date, "2026-06-07")
       }));
 
-      const sanitizedCustodyMovements = custodyMovements.map(m => ({
+      const sanitizedCustodyMovements = notDeleted('custody_movements', custodyMovements).map(m => ({
         ...m,
         date: sanitizeDateStr(m.date, "2026-06-07")
       }));
 
-      const sanitizedTransportRequests = transportRequests.map(r => ({
+      const sanitizedTransportRequests = notDeleted('transport_requests', transportRequests).map(r => ({
         ...r,
         request_date: sanitizeDateStr(r.request_date, "2026-06-07")
       }));
 
-      const uploadTasks = [
-        sanitizedDrivers.length > 0 ? supabase.from('drivers').upsert(sanitizedDrivers) : Promise.resolve({ error: null }),
-        officials.length > 0 ? supabase.from('officials').upsert(officials) : Promise.resolve({ error: null }),
-        sanitizedCars.length > 0 ? supabase.from('cars').upsert(sanitizedCars) : Promise.resolve({ error: null }),
-        sanitizedViolations.length > 0 ? supabase.from('violations').upsert(sanitizedViolations) : Promise.resolve({ error: null }),
-        sanitizedInvoices.length > 0 ? supabase.from('invoices').upsert(sanitizedInvoices) : Promise.resolve({ error: null }),
-        invoiceItems.length > 0 ? supabase.from('invoice_items').upsert(invoiceItems) : Promise.resolve({ error: null }),
-        sanitizedAuditLogs.length > 0 ? supabase.from('invoice_audit_logs').upsert(sanitizedAuditLogs) : Promise.resolve({ error: null }),
-        sanitizedMovements.length > 0 ? supabase.from('driver_account_movements').upsert(sanitizedMovements) : Promise.resolve({ error: null }),
-        custodyAccounts.length > 0 ? supabase.from('custody_accounts').upsert(custodyAccounts) : Promise.resolve({ error: null }),
-        sanitizedCustodyMovements.length > 0 ? supabase.from('custody_movements').upsert(sanitizedCustodyMovements) : Promise.resolve({ error: null })
+      // رفع متسلسل بترتيب الاعتماديات (المسؤولين ← السائقين ← السيارات ...) لتفادي أخطاء المفاتيح الأجنبية
+      const uploadSteps: Array<[string, any[]]> = [
+        ['officials', notDeleted('officials', officials)],
+        ['drivers', sanitizedDrivers],
+        ['cars', sanitizedCars],
+        ['violations', sanitizedViolations],
+        ['invoices', sanitizedInvoices],
+        ['invoice_items', notDeleted('invoice_items', invoiceItems)],
+        ['invoice_audit_logs', sanitizedAuditLogs],
+        ['driver_account_movements', sanitizedMovements],
+        ['custody_accounts', notDeleted('custody_accounts', custodyAccounts)],
+        ['custody_movements', sanitizedCustodyMovements]
       ];
-
-      const results = await Promise.all(uploadTasks);
-      const errors = results.filter(r => r && r.error).map(r => r.error);
+      const errors: any[] = [];
+      for (const [table, rows] of uploadSteps) {
+        if (!rows || rows.length === 0) continue;
+        const { error } = await supabase.from(table).upsert(rows);
+        if (error) errors.push(error);
+      }
 
       // رفع طلبات النقل بشكل منفصل ومتسامح: لو الجدول غير منشأ بعد على مشروع قديم، منمنعش باقي المزامنة
       if (sanitizedTransportRequests.length > 0) {
@@ -2174,6 +2316,24 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         } catch (e) {
           console.warn("Supabase upload transport_requests exception:", e);
         }
+      }
+
+      // إعدادات النظام وكلمات المرور بتتحفظ دايمًا حتى لو جدول بيانات فشل رفعه
+      // Safe separate background save for administrative credentials / system settings
+      try {
+        const settingsToUpsert = [
+          { key: 'admin_password', value: adminPassword },
+          { key: 'manager_password', value: managerPassword },
+          { key: 'movement_supervisor_password', value: movementSupervisorPassword },
+          { key: 'requests_agent_password', value: requestsAgentPassword },
+          { key: 'companies', value: JSON.stringify(companies) },
+          { key: 'hidden_companies', value: JSON.stringify(hiddenCompanies) },
+          { key: 'farms', value: JSON.stringify(farms) },
+          { key: 'deleted_ids', value: JSON.stringify(tombstonesRef.current) }
+        ];
+        await supabase.from('system_settings').upsert(settingsToUpsert);
+      } catch (settingsUpsertError) {
+        console.warn("Supabase upsert system_settings error:", settingsUpsertError);
       }
 
       if (errors.length > 0) {
@@ -2210,22 +2370,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           };
         }
         return { success: false, message: `فشل الرفع السحابي: ${err.message}` };
-      }
-
-      // Safe separate background save for administrative credentials / system settings
-      try {
-        const settingsToUpsert = [
-          { key: 'admin_password', value: adminPassword },
-          { key: 'manager_password', value: managerPassword },
-          { key: 'movement_supervisor_password', value: movementSupervisorPassword },
-          { key: 'requests_agent_password', value: requestsAgentPassword },
-          { key: 'companies', value: JSON.stringify(companies) },
-          { key: 'hidden_companies', value: JSON.stringify(hiddenCompanies) },
-          { key: 'farms', value: JSON.stringify(farms) }
-        ];
-        await supabase.from('system_settings').upsert(settingsToUpsert);
-      } catch (settingsUpsertError) {
-        console.warn("Supabase upsert system_settings error:", settingsUpsertError);
       }
 
       setIsCloudConnected(true);
