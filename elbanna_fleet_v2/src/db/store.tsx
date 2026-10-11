@@ -2262,9 +2262,12 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return {
           ...inv,
           invoice_number: invNum,
-          invoice_date: sanitizeDateStr(inv.invoice_date, "2026-06-07")
+          invoice_date: sanitizeDateStr(inv.invoice_date, "2026-06-07"),
+          // لو الفاتورة مرتبطة بسيارة اتحذفت، نفك الربط (زي ON DELETE SET NULL) بدل ما الرفع كله يفشل
+          car_id: (inv.car_id && sanitizedCars.some(c => c.id === inv.car_id)) ? inv.car_id : (null as any)
         };
       });
+      const uploadedInvoiceIds = new Set(sanitizedInvoices.map(i => i.id));
 
       const sanitizedAuditLogs = auditLogs.map(l => ({
         ...l,
@@ -2293,17 +2296,33 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         ['cars', sanitizedCars],
         ['violations', sanitizedViolations],
         ['invoices', sanitizedInvoices],
-        ['invoice_items', notDeleted('invoice_items', invoiceItems)],
+        ['invoice_items', notDeleted('invoice_items', invoiceItems).filter(i => uploadedInvoiceIds.has(i.invoice_id))],
         ['invoice_audit_logs', sanitizedAuditLogs],
         ['driver_account_movements', sanitizedMovements],
         ['custody_accounts', notDeleted('custody_accounts', custodyAccounts)],
         ['custody_movements', sanitizedCustodyMovements]
       ];
       const errors: any[] = [];
+      const failedRows: string[] = [];
+      // لو صف واحد خالف قيد (تكرار/ربط مكسور) بنقسم الدفعة لنصين لحد ما نعزل الصف المعطوب ونرفع الباقي
+      const upsertSalvage = async (table: string, rows: any[]): Promise<void> => {
+        const { error } = await supabase.from(table).upsert(rows);
+        if (!error) return;
+        const isConstraint = error.code === '23505' || error.code === '23503';
+        if (!isConstraint) { errors.push(error); return; }
+        if (rows.length === 1) {
+          const r = rows[0];
+          failedRows.push(`${table} (${r.invoice_number || r.car_number || r.driver_code || r.id}): ${error.message}`);
+          errors.push(error);
+          return;
+        }
+        const mid = Math.ceil(rows.length / 2);
+        await upsertSalvage(table, rows.slice(0, mid));
+        await upsertSalvage(table, rows.slice(mid));
+      };
       for (const [table, rows] of uploadSteps) {
         if (!rows || rows.length === 0) continue;
-        const { error } = await supabase.from(table).upsert(rows);
-        if (error) errors.push(error);
+        await upsertSalvage(table, rows);
       }
 
       // رفع طلبات النقل بشكل منفصل ومتسامح: لو الجدول غير منشأ بعد على مشروع قديم، منمنعش باقي المزامنة
@@ -2338,6 +2357,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
       if (errors.length > 0) {
         console.error("Supabase upload error:", errors);
+        if (failedRows.length > 0) {
+          console.error("Rows that failed to upload:", failedRows);
+          return {
+            success: false,
+            message: `تم رفع باقي البيانات، لكن ${failedRows.length} سجل رفضته قاعدة البيانات:\n` + failedRows.slice(0, 5).join('\n')
+          };
+        }
         const err = errors[0]!;
         const uploadErrMsg = err.message || "";
         
