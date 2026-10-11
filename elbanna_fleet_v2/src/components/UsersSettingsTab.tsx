@@ -84,6 +84,7 @@ export function UsersSettingsTab() {
   const [editName, setEditName] = useState('');
   const [editUsername, setEditUsername] = useState('');
   const [editPassword, setEditPassword] = useState('');
+  const [editOfficialName, setEditOfficialName] = useState('');
   const [visiblePasswordFor, setVisiblePasswordFor] = useState<string | null>(null);
 
   const startEdit = (id: string) => {
@@ -93,10 +94,11 @@ export function UsersSettingsTab() {
     setEditName(u.display_name);
     setEditUsername(u.username);
     setEditPassword(u.password);
+    setEditOfficialName(u.linked_official_id ? (db.officials.find(o => o.id === u.linked_official_id)?.name || '') : '');
   };
 
   const saveEditIdentity = (id: string) => {
-    const res = db.updateSystemUser(id, { username: editUsername, password: editPassword, display_name: editName });
+    const res = db.updateSystemUser(id, { username: editUsername, password: editPassword, display_name: editName, official_name: editOfficialName });
     if (!res.success) {
       showNotification('error', res.error || 'تعذّر الحفظ');
       return;
@@ -213,6 +215,9 @@ export function UsersSettingsTab() {
                       <input value={editUsername} onChange={(e) => setEditUsername(e.target.value)} placeholder="اسم المستخدم" className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono outline-none focus:border-emerald-500 w-28" />
                       <span className="text-slate-600 flex items-center gap-1"><Key className="w-3 h-3" /></span>
                       <input value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder="كلمة المرور" className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono outline-none focus:border-emerald-500 w-28" />
+                      {u.linked_official_id && (
+                        <input value={editOfficialName} onChange={(e) => setEditOfficialName(e.target.value)} placeholder="اسم مسؤول التراخيص" title="اسم مسؤول التراخيص (مستقل عن الاسم واسم المستخدم)" className="bg-slate-950 border border-amber-500/40 rounded-lg px-2.5 py-1.5 text-amber-300 text-xs font-bold outline-none focus:border-amber-400 w-36" />
+                      )}
                       <button type="button" onClick={() => saveEditIdentity(u.id)} className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-2.5 py-1.5 rounded text-[10px] font-black">حفظ</button>
                       <button type="button" onClick={() => setEditingId(null)} className="bg-slate-800 text-slate-300 px-2.5 py-1.5 rounded text-[10px]">إلغاء</button>
                     </>
@@ -229,7 +234,7 @@ export function UsersSettingsTab() {
                       </span>
                       {u.linked_official_id && (
                         <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1">
-                          <Wallet className="w-3 h-3" /> عنده حساب عهدة
+                          <Wallet className="w-3 h-3" /> مسؤول التراخيص: {db.officials.find(o => o.id === u.linked_official_id)?.name || '—'}
                         </span>
                       )}
                       {isActiveSession && (
