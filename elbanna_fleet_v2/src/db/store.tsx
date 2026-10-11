@@ -255,7 +255,7 @@ interface DbContextType {
   // نظام المستخدمين الموحّد — شاشة واحدة، كل مستخدم بشاشاته الخاصة من غير ارتباط بقسم/رتبة
   systemUsers: SystemUser[];
   addSystemUser: (username: string, password: string, displayName: string, allowedScreens: string[]) => { success: boolean; error?: string; user?: SystemUser };
-  updateSystemUser: (id: string, updates: { username?: string; password?: string; display_name?: string; allowed_screens?: string[] }) => { success: boolean; error?: string; gainedCustodyAccount?: boolean };
+  updateSystemUser: (id: string, updates: { username?: string; password?: string; display_name?: string; official_name?: string; allowed_screens?: string[] }) => { success: boolean; error?: string; gainedCustodyAccount?: boolean };
   deleteSystemUser: (id: string) => void;
 
   // إعدادات تكلفة خطوط السير — المرحلة 1 من تطوير نظام طلبات النقل
@@ -1031,7 +1031,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   // تحديث بيانات مستخدم (اسم/يوزر/باسورد/شاشات) — ولو ضاف صلاحية "فواتير تراخيص" لأول مرة
   // بيتعمله تلقائيًا حساب عهدة (Official) مربوط بيه عشان يقدر يستخدم الشاشة دي فعليًا
-  const updateSystemUser = (id: string, updates: { username?: string; password?: string; display_name?: string; allowed_screens?: string[] }) => {
+  const updateSystemUser = (id: string, updates: { username?: string; password?: string; display_name?: string; official_name?: string; allowed_screens?: string[] }) => {
     const target = systemUsers.find(u => u.id === id);
     if (!target) return { success: false, error: 'المستخدم غير موجود' };
     if (updates.username) {
@@ -1056,10 +1056,11 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       linkedOfficialId = newOfficial.id;
     }
 
-    // لو عنده حساب عهدة مربوط بالفعل، نخلي اسمه/باسوورده في حساب العهدة متزامن مع التعديل هنا
-    if (linkedOfficialId && (updates.display_name || updates.password)) {
-      if (updates.display_name && updates.display_name.trim() !== target.display_name) {
-        updateOfficialName(linkedOfficialId, updates.display_name.trim());
+    // اسم مسؤول التراخيص (حساب العهدة) مستقل تمامًا عن الاسم الظاهر واسم المستخدم:
+    // بيتغيّر بس لو اتبعت official_name صراحةً. الباسورد بس هو اللي بيفضل متزامن لأنه بيستخدم في الدخول.
+    if (linkedOfficialId) {
+      if (updates.official_name && updates.official_name.trim()) {
+        updateOfficialName(linkedOfficialId, updates.official_name.trim());
       }
       if (updates.password) {
         updateOfficialPassword(linkedOfficialId, updates.password);
@@ -3090,13 +3091,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }
       return o;
     }));
-
-    // لو المستخدم الحالي المسجل دخوله دلوقتي هو نفسه المشرف ده، نحدّث اسمه في الجلسة النشطة كمان
-    if (currentUser?.role === 'supervisor' && currentUser.officialId === id) {
-      const updatedUser = { ...currentUser, name: trimmed };
-      setCurrentUser(updatedUser);
-      localStorage.setItem('elbanna_current_user', JSON.stringify(updatedUser));
-    }
 
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected && updatedParent) {
