@@ -195,6 +195,11 @@ CREATE TABLE IF NOT EXISTS invoices (
 
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS car_location TEXT;
 
+-- موافقة المالية على فواتير التراخيص (الفواتير القديمة تتعامل كمعتمدة)
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'approved';
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approved_by VARCHAR(100);
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+
 -- 6. Invoice Items Table
 CREATE TABLE IF NOT EXISTS invoice_items (
   id TEXT PRIMARY KEY,

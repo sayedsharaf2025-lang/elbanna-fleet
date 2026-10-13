@@ -23,6 +23,9 @@ import { RouteAccountingTab } from './components/RouteAccountingTab';
 import { CarDailyCostsTab } from './components/CarDailyCostsTab';
 import { MaintenanceTab } from './components/MaintenanceTab';
 import { VehicleProfitabilityTab } from './components/VehicleProfitabilityTab';
+import { LicenseApprovalsTab } from './components/LicenseApprovalsTab';
+import { CarMonthlyCostsTab } from './components/CarMonthlyCostsTab';
+import { BackupButton } from './components/BackupButton';
 import {
   LayoutDashboard,
   Truck,
@@ -48,6 +51,8 @@ import {
   Gauge,
   Wrench,
   Package,
+  FileCheck,
+  Wallet,
   ChevronDown,
   TrendingUp
 } from 'lucide-react';
@@ -67,7 +72,7 @@ function DashboardLayout() {
     return user.allowedScreens || [];
   }, [db.currentUser, db.systemUsers]);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance' | 'maintenance_requests' | 'maintenance_parts' | 'maintenance_execution' | 'maintenance_review' | 'maintenance_accounting' | 'vehicle_profitability'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance' | 'maintenance_requests' | 'maintenance_parts' | 'maintenance_execution' | 'maintenance_review' | 'maintenance_accounting' | 'license_invoice_approvals' | 'car_monthly_costs' | 'vehicle_profitability'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   // المجموعة المفتوحة حاليًا في القايمة الجانبية (واحدة بس مفتوحة في كل مرة)
   const [openGroup, setOpenGroup] = useState<string | null>(null);
@@ -138,8 +143,10 @@ function DashboardLayout() {
       items: [
         { id: 'route_accounting' as const, label: 'حساب خطوط السير', icon: Route },
         { id: 'car_daily_costs' as const, label: 'مصاريف وأرباح السيارات اليومية', icon: Gauge },
+        { id: 'car_monthly_costs' as const, label: 'المرتبات والسولار والزيت الشهرية', icon: Wallet },
         { id: 'vehicle_profitability' as const, label: 'ربحية السيارات', icon: TrendingUp },
         { id: 'custody_licensing' as const, label: 'فواتير تراخيص', icon: Receipt },
+        { id: 'license_invoice_approvals' as const, label: 'اعتماد فواتير التراخيص', icon: FileCheck },
         { id: 'deductions' as const, label: 'الخصومات الفردية والجماعية', icon: CreditCard },
         { id: 'cross_accounts' as const, label: 'أرشيف وحسابات السائقين (شهرية)', icon: FileSpreadsheet },
       ]
@@ -162,6 +169,16 @@ function DashboardLayout() {
       ]
     },
   ];
+
+  // عدّادات الطلبات المنتظرة على القايمة الجانبية
+  const maintCount = (statuses: string[]) => db.maintenanceRequests.filter(r => statuses.includes(r.status)).length;
+  const badgeCounts: Record<string, number> = {
+    license_invoice_approvals: db.invoices.filter(i => !i.is_deleted && i.approval_status === 'pending').length,
+    maintenance_parts: maintCount(['pending_parts']),
+    maintenance_execution: maintCount(['in_progress']),
+    maintenance_review: maintCount(['pending_review']),
+    maintenance_accounting: maintCount(['pending_invoice', 'invoiced']),
+  };
 
   // لما الشاشة النشطة تتغيّر (مثلًا بعد الدخول أو التحويل التلقائي) نفتح المجموعة اللي تحتها الشاشة دي
   useEffect(() => {
@@ -199,6 +216,15 @@ function DashboardLayout() {
           </div>
 
           <div className="flex items-center gap-4">
+            {/* مؤشر حالة المزامنة مع السحابة */}
+            <div
+              className={`flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border ${db.cloudError ? 'bg-rose-950 text-rose-300 border-rose-500/30' : db.isCloudConnected ? 'bg-emerald-950 text-emerald-300 border-emerald-500/30' : 'bg-slate-950 text-slate-400 border-slate-800'}`}
+              title={db.cloudError || ''}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${db.cloudError ? 'bg-rose-400' : db.isCloudConnected ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
+              <span className="hidden sm:inline">{db.cloudError ? 'فشل المزامنة' : db.isCloudConnected ? 'متزامن مع السحابة' : 'غير متصل بالسحابة'}</span>
+            </div>
+
             {/* User status & Logout */}
             <div className="flex items-center gap-3 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
               <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
@@ -219,6 +245,8 @@ function DashboardLayout() {
               <Clock className="w-3.5 h-3.5 text-slate-500" />
               <span>{currentTime.toLocaleTimeString('ar-EG')}</span>
             </div>
+
+            <BackupButton />
 
             {/* Quick Developer Supabase trigger */}
             <button
@@ -302,6 +330,11 @@ function DashboardLayout() {
                     >
                       <GroupIcon className={`w-4 h-4 ${hasActiveChild ? 'text-emerald-400' : 'text-slate-500'}`} />
                       <span className="flex-1">{entry.label}</span>
+                      {visibleItems.reduce((sum, i) => sum + (badgeCounts[i.id] || 0), 0) > 0 && (
+                        <span className="bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center">
+                          {visibleItems.reduce((sum, i) => sum + (badgeCounts[i.id] || 0), 0)}
+                        </span>
+                      )}
                       <ChevronDown className={`w-4 h-4 text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                     </button>
                     {isOpen && (
@@ -319,7 +352,10 @@ function DashboardLayout() {
                               className={`w-full text-right px-3 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2.5 border ${activeTab === item.id ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'text-slate-405 hover:bg-slate-800 hover:text-slate-200 border-transparent'}`}
                             >
                               <Icon className={`w-4 h-4 ${activeTab === item.id ? 'text-emerald-400' : 'text-slate-500'}`} />
-                              <span>{item.label}</span>
+                              <span className="flex-1">{item.label}</span>
+                              {(badgeCounts[item.id] || 0) > 0 && (
+                                <span className="bg-rose-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full min-w-[1.25rem] text-center">{badgeCounts[item.id]}</span>
+                              )}
                             </button>
                           );
                         })}
@@ -407,6 +443,8 @@ function DashboardLayout() {
             {activeTab === 'transport_cost_settings' && <TransportCostSettingsTab />}
             {activeTab === 'route_accounting' && <RouteAccountingTab />}
             {activeTab === 'car_daily_costs' && <CarDailyCostsTab />}
+            {activeTab === 'license_invoice_approvals' && <LicenseApprovalsTab />}
+            {activeTab === 'car_monthly_costs' && <CarMonthlyCostsTab />}
             {activeTab === 'maintenance' && <MaintenanceTab />}
             {activeTab === 'maintenance_requests' && <MaintenanceTab mode="requests" />}
             {activeTab === 'maintenance_parts' && <MaintenanceTab mode="parts" />}

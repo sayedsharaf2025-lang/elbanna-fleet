@@ -19,6 +19,7 @@ import {
   CheckCircle,
   ClipboardPaste,
   Sparkles,
+  FileCheck,
 } from 'lucide-react';
 
 const num = (v: string) => {
@@ -196,7 +197,7 @@ export function CarDailyCostsTab() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-2.5 text-xs">
+              <div className="grid grid-cols-2 md:grid-cols-7 gap-2.5 text-xs">
                 <div>
                   <label className="block text-slate-500 font-bold mb-1 flex items-center gap-1"><Gauge className="w-3.5 h-3.5" /> المسافة (كم)</label>
                   <input type="number" step="0.1" min="0" value={d.distance} onChange={(e) => updateDraft(car.id, { distance: e.target.value })} className="w-full p-2 rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-500 text-slate-800 font-mono" />
@@ -210,7 +211,7 @@ export function CarDailyCostsTab() {
                   <input type="number" step="0.01" min="0" value={d.cards} onChange={(e) => updateDraft(car.id, { cards: e.target.value })} className="w-full p-2 rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-500 text-slate-800 font-mono" />
                 </div>
                 <div>
-                  <label className="block text-slate-500 font-bold mb-1 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> مخالفات</label>
+                  <label className="block text-slate-500 font-bold mb-1 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> مخالفات (للعلم — الحساب من فواتير التراخيص)</label>
                   <input type="number" step="0.01" min="0" value={d.violations} onChange={(e) => updateDraft(car.id, { violations: e.target.value })} className="w-full p-2 rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-500 text-slate-800 font-mono" />
                 </div>
                 <div>
@@ -221,6 +222,12 @@ export function CarDailyCostsTab() {
                   <label className="block text-slate-500 font-bold mb-1 flex items-center gap-1"><Wrench className="w-3.5 h-3.5" /> صيانة</label>
                   <div className="p-2 rounded-lg border border-slate-100 bg-slate-50 text-slate-600 font-mono font-bold" title="بتتحسب تلقائيًا من فواتير الصيانة المعتمدة لنفس السيارة في نفس اليوم — مش إدخال يدوي">
                     {db.getMaintenanceCostForCarDay(car.id, selectedDate).toLocaleString()} ج.م
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-slate-500 font-bold mb-1 flex items-center gap-1"><FileCheck className="w-3.5 h-3.5" /> تراخيص</label>
+                  <div className="p-2 rounded-lg border border-slate-100 bg-slate-50 text-slate-600 font-mono font-bold" title="بتتحسب تلقائيًا من فواتير التراخيص المعتمدة من المالية لنفس السيارة في نفس اليوم — مش إدخال يدوي">
+                    {db.getLicenseCostForCarDay(car.id, selectedDate).toLocaleString()} ج.م
                   </div>
                 </div>
               </div>

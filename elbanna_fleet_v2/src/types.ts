@@ -94,6 +94,9 @@ export interface Invoice {
   license_details?: string; // بيان الترخيص
   license_location?: string; // مكان الترخيص
   car_location?: string; // مكان السيارة
+  approval_status?: 'pending' | 'approved'; // قيد موافقة المالية / معتمدة (الفواتير القديمة تعتبر معتمدة)
+  approved_by?: string; // اسم من اعتمد الفاتورة
+  approved_at?: string; // وقت الاعتماد
 }
 
 export interface CustodyAccount {
@@ -163,6 +166,19 @@ export interface TransportRequestCost {
   id: string;
   request_id: string;
   legs: TransportRouteLegSmoke[]; // دخان كل محطة في خط سير الطلب بالترتيب
+  updated_at: string;
+  updated_by?: string;
+}
+
+// تكاليف شهرية لسيارة معينة: مرتب السائق اللي شغال عليها + السولار + الزيت (سجل واحد لكل سيارة+شهر)
+export interface CarMonthlyCost {
+  id: string;
+  car_id: string;
+  month: string; // YYYY-MM
+  driver_id?: string; // السائق اللي مرتبه محسوب على السيارة في الشهر ده
+  salary_amount: number;
+  diesel_amount: number;
+  oil_amount: number;
   updated_at: string;
   updated_by?: string;
 }

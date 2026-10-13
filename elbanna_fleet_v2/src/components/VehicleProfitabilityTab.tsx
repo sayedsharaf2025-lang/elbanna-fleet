@@ -17,11 +17,26 @@ import {
   Droplets,
   Wrench,
   Printer,
+  FileCheck,
 } from 'lucide-react';
 
 // شاشة ربحية السيارة: صافي الربح = النولون (الدخل) − كل المصاريف المرتبطة (دخان + كارتات +
 // مخالفات + غسيل كاوتش + صيانة حقيقية من فواتير الصيانة). كل رقم هنا مسحوب حيًّا من مصدره
 // الأصلي الوحيد — مفيش تكرار أو إدخال يدوي مباشر في الشاشة دي.
+// نسبة الجزء اللي بيتقاطع من الشهر ده مع المدى المختار (لتوزيع التكاليف الشهرية بالتناسب على الأيام)
+const monthOverlapShare = (month: string, from: string, to: string) => {
+  const [y, m] = month.split('-').map(Number);
+  if (!y || !m) return 0;
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const start = `${month}-01`;
+  const end = `${month}-${String(daysInMonth).padStart(2, '0')}`;
+  const s = from > start ? from : start;
+  const e = to < end ? to : end;
+  if (s > e) return 0;
+  const days = Math.round((new Date(e).getTime() - new Date(s).getTime()) / 86400000) + 1;
+  return days / daysInMonth;
+};
+
 export function VehicleProfitabilityTab() {
   const db = useDb();
   const [dateFrom, setDateFrom] = useState(() => {
@@ -38,7 +53,11 @@ export function VehicleProfitabilityTab() {
       const dailyRecords = db.carDailyCosts.filter(c => c.car_id === car.id && c.date >= dateFrom && c.date <= dateTo);
       const freight = dailyRecords.reduce((s, c) => s + (c.freight_amount || 0), 0);
       const cards = dailyRecords.reduce((s, c) => s + (c.cards_amount || 0), 0);
-      const violations = dailyRecords.reduce((s, c) => s + (c.violations_amount || 0), 0);
+      // المخالفات كلها بتتحسب تكلفة من فواتير التراخيص، فمبلغ "مخالفات" اليدوي اليومي مابقاش بيتخصم هنا (منعًا للتكرار).
+      // المبلغ اللي بيتخصم من السائق بيرجع للسيارة كإيراد: مجموع حركات الخصم المربوطة بالسيارة في المدى
+      const recovered = db.movements
+        .filter(m => m.type === 'deduction' && m.car_id === car.id && m.date >= dateFrom && m.date <= dateTo)
+        .reduce((s, m) => s + Math.abs(m.amount_change || 0), 0);
       const tireWash = dailyRecords.reduce((s, c) => s + (c.tire_wash_amount || 0), 0);
       const extra = dailyRecords.reduce((s, c) => s + (c.extra_costs || []).reduce((ss, i) => ss + (i.amount || 0), 0), 0);
 
@@ -57,18 +76,45 @@ export function VehicleProfitabilityTab() {
         .forEach(inv => maintenanceDatesSet.add(inv.invoice_date));
       const maintenance = Array.from(maintenanceDatesSet).reduce((s, date) => s + db.getMaintenanceCostForCarDay(car.id, date), 0);
 
-      const totalCost = smoke + cards + violations + tireWash + extra + maintenance;
-      const net = freight - totalCost;
+      // تكلفة التراخيص: فواتير التراخيص المعتمدة من المالية لنفس السيارة في المدى المختار
+      const license = db.invoices
+        .filter(inv => !inv.is_deleted && (inv.approval_status || 'approved') === 'approved' && inv.car_id === car.id && inv.invoice_date >= dateFrom && inv.invoice_date <= dateTo)
+        .reduce((s, inv) => s + (inv.total_amount || 0), 0);
 
-      return { car, freight, smoke, cards, violations, tireWash, extra, maintenance, totalCost, net, tripCount: carRequests.length };
-    }).filter(r => r.freight > 0 || r.totalCost > 0);
-  }, [db.cars, db.carDailyCosts, db.transportRequests, db.transportRequestCosts, db.maintenanceInvoices, dateFrom, dateTo]);
+      // التكاليف الشهرية (مرتب السائق + سولار + زيت) موزّعة بالتناسب على أيام المدى المختار
+      let salary = 0, diesel = 0, oil = 0;
+      const driverIds = new Set<string>();
+      db.carMonthlyCosts.filter(r => r.car_id === car.id).forEach(r => {
+        const share = monthOverlapShare(r.month, dateFrom, dateTo);
+        if (share <= 0) return;
+        salary += (r.salary_amount || 0) * share;
+        diesel += (r.diesel_amount || 0) * share;
+        oil += (r.oil_amount || 0) * share;
+        if (r.driver_id) driverIds.add(r.driver_id);
+      });
+      salary = Math.round(salary * 100) / 100;
+      diesel = Math.round(diesel * 100) / 100;
+      oil = Math.round(oil * 100) / 100;
+      const driverNames = Array.from(driverIds).map(id => db.drivers.find(d => d.id === id)?.name).filter(Boolean).join(' / ');
+
+      const totalCost = smoke + cards + tireWash + extra + maintenance + license + salary + diesel + oil;
+      const net = freight + recovered - totalCost;
+
+      return { car, freight, recovered, smoke, cards, tireWash, extra, maintenance, license, salary, diesel, oil, driverNames, totalCost, net, tripCount: carRequests.length };
+    }).filter(r => r.freight > 0 || r.totalCost > 0 || r.recovered > 0);
+  }, [db.cars, db.carDailyCosts, db.transportRequests, db.transportRequestCosts, db.maintenanceInvoices, db.invoices, db.carMonthlyCosts, db.drivers, db.movements, dateFrom, dateTo]);
 
   const totals = useMemo(() => rows.reduce((acc, r) => ({
     freight: acc.freight + r.freight,
+    recovered: acc.recovered + r.recovered,
     totalCost: acc.totalCost + r.totalCost,
     net: acc.net + r.net,
-  }), { freight: 0, totalCost: 0, net: 0 }), [rows]);
+  }), { freight: 0, recovered: 0, totalCost: 0, net: 0 }), [rows]);
+
+  // خصومات من السائقين في المدى بدون سيارة محددة (خصم جماعي أو فردي من غير ربط بسيارة) — مش بتتحسب على أي سيارة
+  const unassignedDeductions = useMemo(() => db.movements
+    .filter(m => m.type === 'deduction' && !m.car_id && m.date >= dateFrom && m.date <= dateTo)
+    .reduce((s, m) => s + Math.abs(m.amount_change || 0), 0), [db.movements, dateFrom, dateTo]);
 
   const handlePrint = () => {
     const win = window.open('', '_blank', 'width=1100,height=700');
@@ -86,16 +132,16 @@ export function VehicleProfitabilityTab() {
         <h1>تقرير ربحية السيارات</h1>
         <div class="sub">من ${dateFrom} إلى ${dateTo} — تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')}</div>
         <table><thead><tr>
-          <th>السيارة</th><th>عدد النقلات</th><th>النولون (الدخل)</th><th>دخان</th><th>كارتات</th><th>مخالفات</th><th>غسيل كاوتش</th><th>صيانة</th><th>إجمالي التكلفة</th><th>صافي الربح</th>
+          <th>السيارة</th><th>عدد النقلات</th><th>النولون (الدخل)</th><th>دخان</th><th>كارتات</th><th>خصم مخالفات (+)</th><th>غسيل كاوتش</th><th>صيانة</th><th>تراخيص</th><th>مرتب السائق</th><th>سولار</th><th>زيت</th><th>إجمالي التكلفة</th><th>صافي الربح</th>
         </tr></thead><tbody>
           ${rows.map(r => `<tr>
             <td>${r.car.car_number}</td><td>${r.tripCount}</td><td>${r.freight.toLocaleString()}</td>
-            <td>${r.smoke.toLocaleString()}</td><td>${r.cards.toLocaleString()}</td><td>${r.violations.toLocaleString()}</td>
-            <td>${r.tireWash.toLocaleString()}</td><td>${r.maintenance.toLocaleString()}</td><td>${r.totalCost.toLocaleString()}</td>
+            <td>${r.smoke.toLocaleString()}</td><td>${r.cards.toLocaleString()}</td><td>${r.recovered.toLocaleString()}</td>
+            <td>${r.tireWash.toLocaleString()}</td><td>${r.maintenance.toLocaleString()}</td><td>${r.license.toLocaleString()}</td><td>${r.salary.toLocaleString()}</td><td>${r.diesel.toLocaleString()}</td><td>${r.oil.toLocaleString()}</td><td>${r.totalCost.toLocaleString()}</td>
             <td class="${r.net >= 0 ? 'pos' : 'neg'}">${r.net.toLocaleString()}</td>
           </tr>`).join('')}
         </tbody><tfoot><tr>
-          <td colspan="2">الإجمالي الكلي</td><td>${totals.freight.toLocaleString()}</td><td colspan="5"></td><td>${totals.totalCost.toLocaleString()}</td>
+          <td colspan="2">الإجمالي الكلي</td><td>${totals.freight.toLocaleString()}</td><td colspan="9"></td><td>${totals.totalCost.toLocaleString()}</td>
           <td class="${totals.net >= 0 ? 'pos' : 'neg'}">${totals.net.toLocaleString()}</td>
         </tr></tfoot></table>
       </body></html>
@@ -110,7 +156,7 @@ export function VehicleProfitabilityTab() {
         <div>
           <span className="text-xs font-bold text-emerald-600 tracking-wider block uppercase mb-1">المالية</span>
           <h2 className="text-xl md:text-2xl font-black text-slate-800 font-sans tracking-tight flex items-center gap-2"><TrendingUp className="w-6 h-6" /> ربحية السيارات</h2>
-          <p className="text-xs text-slate-500 mt-1 leading-relaxed">صافي الربح = النولون (الدخل) − كل المصاريف (دخان، كارتات، مخالفات، غسيل كاوتش، صيانة). كل رقم هنا مسحوب حيًّا من مصدره الأصلي، بدون أي إدخال يدوي مباشر أو احتمال تكرار.</p>
+          <p className="text-xs text-slate-500 mt-1 leading-relaxed">صافي الربح = النولون (الدخل) + خصومات المخالفات من السائقين − كل المصاريف (دخان، كارتات، غسيل كاوتش، صيانة، تراخيص، مرتب السائق، سولار، زيت). كل رقم هنا مسحوب حيًّا من مصدره الأصلي، بدون أي إدخال يدوي مباشر أو احتمال تكرار.</p>
         </div>
       </div>
 
@@ -132,10 +178,14 @@ export function VehicleProfitabilityTab() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
           <p className="text-[11px] text-slate-500 font-bold">إجمالي النولون (الدخل)</p>
           <p className="text-lg font-black text-indigo-600">{totals.freight.toLocaleString()} ج.م</p>
+        </div>
+        <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
+          <p className="text-[11px] text-slate-500 font-bold">خصومات المخالفات من السائقين (+)</p>
+          <p className="text-lg font-black text-emerald-600">{totals.recovered.toLocaleString()} ج.م</p>
         </div>
         <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm text-center">
           <p className="text-[11px] text-slate-500 font-bold">إجمالي كل التكاليف</p>
@@ -147,6 +197,12 @@ export function VehicleProfitabilityTab() {
         </div>
       </div>
 
+      {unassignedDeductions > 0 && (
+        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
+          تنبيه: فيه خصومات من السائقين بقيمة {unassignedDeductions.toLocaleString()} ج.م في الفترة دي من غير سيارة محددة (خصم جماعي أو بدون ربط)، فمش محسوبة على أي سيارة. اربطها بسيارة من شاشة الخصومات لو عايزها تدخل في الربح.
+        </p>
+      )}
+
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto text-xs font-sans">
           <table className="w-full text-right border-collapse">
@@ -157,9 +213,13 @@ export function VehicleProfitabilityTab() {
                 <th className="py-3 px-3">النولون</th>
                 <th className="py-3 px-3">دخان</th>
                 <th className="py-3 px-3">كارتات</th>
-                <th className="py-3 px-3">مخالفات</th>
+                <th className="py-3 px-3">خصم مخالفات (+)</th>
                 <th className="py-3 px-3">غسيل كاوتش</th>
                 <th className="py-3 px-3">صيانة</th>
+                <th className="py-3 px-3">تراخيص</th>
+                <th className="py-3 px-3">مرتب السائق</th>
+                <th className="py-3 px-3">سولار</th>
+                <th className="py-3 px-3">زيت</th>
                 <th className="py-3 px-3">إجمالي التكلفة</th>
                 <th className="py-3 px-3">صافي الربح</th>
               </tr>
@@ -167,14 +227,18 @@ export function VehicleProfitabilityTab() {
             <tbody>
               {rows.sort((a, b) => b.net - a.net).map(r => (
                 <tr key={r.car.id} className="border-b border-slate-100 hover:bg-slate-50/70 text-slate-700">
-                  <td className="py-2.5 px-3 font-bold flex items-center gap-1.5"><Truck className="w-3.5 h-3.5 text-slate-400" /> {r.car.car_number}</td>
+                  <td className="py-2.5 px-3 font-bold flex items-center gap-1.5"><Truck className="w-3.5 h-3.5 text-slate-400" /> {r.car.car_number}{r.driverNames && <span className="text-[10px] text-slate-400 font-normal mr-1">({r.driverNames})</span>}</td>
                   <td className="py-2.5 px-3 font-mono">{r.tripCount}</td>
                   <td className="py-2.5 px-3 font-mono text-indigo-600 font-bold flex items-center gap-1"><Fuel className="w-3 h-3" /> {r.freight.toLocaleString()}</td>
                   <td className="py-2.5 px-3 font-mono"><span className="flex items-center gap-1 text-amber-600"><Wind className="w-3 h-3" /> {r.smoke.toLocaleString()}</span></td>
                   <td className="py-2.5 px-3 font-mono"><span className="flex items-center gap-1 text-slate-500"><CreditCard className="w-3 h-3" /> {r.cards.toLocaleString()}</span></td>
-                  <td className="py-2.5 px-3 font-mono"><span className="flex items-center gap-1 text-slate-500"><AlertTriangle className="w-3 h-3" /> {r.violations.toLocaleString()}</span></td>
+                  <td className="py-2.5 px-3 font-mono"><span className="flex items-center gap-1 text-emerald-600"><AlertTriangle className="w-3 h-3" /> {r.recovered.toLocaleString()}</span></td>
                   <td className="py-2.5 px-3 font-mono"><span className="flex items-center gap-1 text-slate-500"><Droplets className="w-3 h-3" /> {r.tireWash.toLocaleString()}</span></td>
                   <td className="py-2.5 px-3 font-mono"><span className="flex items-center gap-1 text-slate-500"><Wrench className="w-3 h-3" /> {r.maintenance.toLocaleString()}</span></td>
+                  <td className="py-2.5 px-3 font-mono"><span className="flex items-center gap-1 text-slate-500"><FileCheck className="w-3 h-3" /> {r.license.toLocaleString()}</span></td>
+                  <td className="py-2.5 px-3 font-mono text-slate-600">{r.salary.toLocaleString()}</td>
+                  <td className="py-2.5 px-3 font-mono text-amber-600">{r.diesel.toLocaleString()}</td>
+                  <td className="py-2.5 px-3 font-mono text-slate-600">{r.oil.toLocaleString()}</td>
                   <td className="py-2.5 px-3 font-mono text-rose-600 font-bold">{r.totalCost.toLocaleString()}</td>
                   <td className={`py-2.5 px-3 font-mono font-black flex items-center gap-1 ${r.net >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                     {r.net >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />} {r.net.toLocaleString()}
@@ -182,7 +246,7 @@ export function VehicleProfitabilityTab() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={10} className="py-10 text-center text-slate-400 font-bold">لا توجد بيانات تكلفة أو دخل مسجلة في المدى الزمني ده.</td></tr>
+                <tr><td colSpan={14} className="py-10 text-center text-slate-400 font-bold">لا توجد بيانات تكلفة أو دخل مسجلة في المدى الزمني ده.</td></tr>
               )}
             </tbody>
           </table>

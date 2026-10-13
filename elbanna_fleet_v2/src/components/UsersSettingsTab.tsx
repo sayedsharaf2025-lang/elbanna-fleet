@@ -32,6 +32,8 @@ const ALL_SCREENS: { id: string; label: string }[] = [
   { id: 'car_daily_costs', label: 'مصاريف وأرباح السيارات اليومية' },
   { id: 'vehicle_profitability', label: 'ربحية السيارات' },
   { id: 'maintenance', label: 'قسم الصيانة' },
+  { id: 'car_monthly_costs', label: 'المالية — المرتبات والسولار والزيت الشهرية' },
+  { id: 'license_invoice_approvals', label: 'المالية — اعتماد فواتير التراخيص' },
   { id: 'maintenance_requests', label: 'الصيانة — تسجيل الطلبات (مدير الحركة)' },
   { id: 'maintenance_parts', label: 'الصيانة — قطع الغيار' },
   { id: 'maintenance_execution', label: 'الصيانة — التنفيذ' },

@@ -373,7 +373,7 @@ export const InvoicesTab: React.FC = () => {
     }, payloadItems);
 
     if (res.success) {
-      showStatus(`تم حفظ وطباعة الفاتورة المركبة بنجاح، وتدقيق رصيد المسؤول ماليًا السحابي.`, "success");
+      showStatus(`تم حفظ وطباعة الفاتورة وإرسالها لموافقة المالية. الخصم من العهدة بيتم بعد الموافقة بس.`, "success");
       
       // Auto reprint
       if (res.invoice) {
@@ -724,6 +724,9 @@ export const InvoicesTab: React.FC = () => {
       }
     }
   };
+
+  // الفاتورة المعتمدة من المالية مقفولة: التعديل/الحذف لأدمن البرنامج بس
+  const canModifyInvoice = (inv: Invoice) => (inv.approval_status || 'approved') === 'pending' || db.currentUser?.role === 'admin';
 
   const handlePurgeInvoiceClick = (inv: Invoice) => {
     const sup = db.officials.find(o => o.id === inv.official_id);
@@ -1419,6 +1422,16 @@ export const InvoicesTab: React.FC = () => {
                                   معدلة ({inv.version})
                                 </span>
                               )}
+                              {!inv.is_deleted && (inv.approval_status || 'approved') === 'pending' && (
+                                <span className="text-[8px] bg-amber-950 text-amber-400 border border-amber-500/20 px-1 rounded inline-block" title="لسه بانتظار موافقة المالية — مفيش خصم من العهدة">
+                                  قيد موافقة المالية
+                                </span>
+                              )}
+                              {!inv.is_deleted && (inv.approval_status || 'approved') === 'approved' && inv.approved_at && (
+                                <span className="text-[8px] bg-emerald-950 text-emerald-400 border border-emerald-500/20 px-1 rounded inline-block" title={`اعتمدها ${inv.approved_by || ''}`}>
+                                  معتمدة
+                                </span>
+                              )}
                               {inv.is_deleted && (
                                 <span className="text-[8px] bg-rose-950 text-rose-400 border border-rose-500/20 px-1 rounded inline-block">
                                   ملغاة ومحذوفة (مسترد)
@@ -1437,7 +1450,7 @@ export const InvoicesTab: React.FC = () => {
                               >
                                 <Printer className="w-3.5 h-3.5" />
                               </button>
-                              {!inv.is_deleted && (db.currentUser?.role !== 'supervisor' || inv.official_id === db.currentUser.officialId) && (
+                              {!inv.is_deleted && canModifyInvoice(inv) && (db.currentUser?.role !== 'supervisor' || inv.official_id === db.currentUser.officialId) && (
                                 <button
                                   onClick={() => handleOpenEditPreFinalized(inv)}
                                   type="button"
@@ -1447,7 +1460,12 @@ export const InvoicesTab: React.FC = () => {
                                   <History className="w-3.5 h-3.5" />
                                 </button>
                               )}
-                              {inv.is_deleted ? (
+                              {!canModifyInvoice(inv) && (
+                                <span className="bg-slate-800 text-slate-400 p-1.5 rounded inline-flex" title="معتمدة من المالية — التعديل والحذف لأدمن البرنامج فقط">
+                                  <Lock className="w-3.5 h-3.5" />
+                                </span>
+                              )}
+                              {canModifyInvoice(inv) && (inv.is_deleted ? (
                                 (db.currentUser?.role !== 'supervisor' || inv.official_id === db.currentUser.officialId) && (
                                   <button
                                     onClick={() => handleRestoreInvoiceClick(inv)}
@@ -1469,8 +1487,8 @@ export const InvoicesTab: React.FC = () => {
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 )
-                              )}
-                              {db.currentUser?.role !== 'supervisor' && (
+                              ))}
+                              {db.currentUser?.role !== 'supervisor' && canModifyInvoice(inv) && (
                                 <button
                                   onClick={() => handlePurgeInvoiceClick(inv)}
                                   type="button"

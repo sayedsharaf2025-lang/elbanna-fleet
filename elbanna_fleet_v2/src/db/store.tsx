@@ -21,6 +21,7 @@ import {
   RoutePriceEntry,
   TransportRequestCost,
   CarDailyCost,
+  CarMonthlyCost,
   SystemUser,
   MaintenanceRequest,
   MaintenancePartItem,
@@ -212,6 +213,8 @@ interface DbContextType {
 
   // Invoice & Custody Transactions (Crucial database logic)
   createInvoice: (invoiceData: Omit<Invoice, 'id' | 'invoice_number' | 'version' | 'is_modified' | 'is_deleted'>, items: Omit<InvoiceItem, 'id' | 'invoice_id' | 'car_id'>[]) => { success: boolean; error?: string; invoice?: Invoice };
+  approveInvoice: (invoiceId: string) => { success: boolean; error?: string };
+  getLicenseCostForCarDay: (carId: string, date: string) => number;
   updateInvoice: (
     invoiceId: string,
     supervisorName: string,
@@ -277,6 +280,9 @@ interface DbContextType {
   deleteTransportRequestCost: (requestId: string) => void;
   // مصاريف وأرباح السيارات اليومية (مسافة اليوم الكلية، النولون، كارتات، مخالفات، غسيل كاوتش، صيانة)
   carDailyCosts: CarDailyCost[];
+  carMonthlyCosts: CarMonthlyCost[];
+  upsertCarMonthlyCost: (carId: string, month: string, data: Omit<CarMonthlyCost, 'id' | 'car_id' | 'month' | 'updated_at' | 'updated_by'>) => CarMonthlyCost;
+  deleteCarMonthlyCost: (carId: string, month: string) => void;
   upsertCarDailyCost: (carId: string, date: string, data: Omit<CarDailyCost, 'id' | 'car_id' | 'date' | 'updated_at' | 'updated_by'>) => CarDailyCost;
   deleteCarDailyCost: (carId: string, date: string) => void;
 
@@ -320,9 +326,9 @@ const DbContext = createContext<DbContextType | undefined>(undefined);
 // خريطة الصلاحيات الافتراضية للشاشات لكل رتبة — نفس القيم اللي كانت متثبتة (hardcoded) قبل كده
 // في App.tsx، وبقت دلوقتي قابلة للتعديل من شاشة "خريطة صلاحيات الشاشات"
 const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings', 'transport_cost_settings', 'route_accounting', 'car_daily_costs', 'maintenance', 'maintenance_requests', 'maintenance_parts', 'maintenance_execution', 'maintenance_review', 'maintenance_accounting', 'maintenance_discount', 'vehicle_profitability'],
+  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings', 'transport_cost_settings', 'route_accounting', 'car_daily_costs', 'maintenance', 'maintenance_requests', 'maintenance_parts', 'maintenance_execution', 'maintenance_review', 'maintenance_accounting', 'maintenance_discount', 'license_invoice_approvals', 'car_monthly_costs', 'vehicle_profitability'],
   supervisor: ['custody_licensing', 'license_tracking', 'reports'],
-  manager: ['reports', 'route_accounting', 'car_daily_costs', 'vehicle_profitability'],
+  manager: ['reports', 'route_accounting', 'car_daily_costs', 'car_monthly_costs', 'vehicle_profitability'],
   movement_supervisor: ['requests_tracking'],
   requests_agent: ['transport_requests'],
 };
@@ -1299,6 +1305,41 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     persistCarDailyCosts(carDailyCosts.filter(c => !(c.car_id === carId && c.date === normalizedDate)));
   };
 
+  // ===== التكاليف الشهرية (مرتب السائق + سولار + زيت) لكل سيارة — بنفس طريقة حفظ المصاريف اليومية =====
+  const [carMonthlyCosts, setCarMonthlyCosts] = useState<CarMonthlyCost[]>(() =>
+    loadSavedArray<CarMonthlyCost>('elbanna_car_monthly_costs', [])
+  );
+
+  const persistCarMonthlyCosts = (next: CarMonthlyCost[]) => {
+    setCarMonthlyCosts(next);
+    localStorage.setItem('elbanna_car_monthly_costs', JSON.stringify(next));
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'car_monthly_costs', value: JSON.stringify(next) })
+        .then(({ error }) => { if (error) console.warn("Supabase save car_monthly_costs error:", error); });
+    }
+  };
+
+  const upsertCarMonthlyCost = (carId: string, month: string, data: Omit<CarMonthlyCost, 'id' | 'car_id' | 'month' | 'updated_at' | 'updated_by'>) => {
+    const existing = carMonthlyCosts.find(c => c.car_id === carId && c.month === month);
+    const record: CarMonthlyCost = {
+      id: existing?.id || generateId('cmc'),
+      car_id: carId,
+      month,
+      ...data,
+      updated_at: new Date().toISOString(),
+      updated_by: currentUser?.name || currentUser?.username,
+    };
+    persistCarMonthlyCosts(existing
+      ? carMonthlyCosts.map(c => (c.car_id === carId && c.month === month) ? record : c)
+      : [...carMonthlyCosts, record]);
+    return record;
+  };
+
+  const deleteCarMonthlyCost = (carId: string, month: string) => {
+    persistCarMonthlyCosts(carMonthlyCosts.filter(c => !(c.car_id === carId && c.month === month)));
+  };
+
   const [isRealtimeActive, setRealtimeActive] = useState(true);
   const [latencyMs, setLatencyMs] = useState(50);
 
@@ -1752,7 +1793,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setViolations([...cloudViolations, ...localOnly]);
       }
       if (resInvoices.data) {
-        const cloudInvoices = resInvoices.data;
+        const cloudInvoices = resInvoices.data.map((i: any) => ({ ...i, approval_status: i.approval_status || 'approved' }));
         const cloudIds = new Set(cloudInvoices.map(i => i.id));
         const cloudNumbers = new Set(cloudInvoices.map(i => i.invoice_number));
         const localOnly = notDeleted('invoices', invoices).filter(i => !cloudIds.has(i.id) && !cloudNumbers.has(i.invoice_number));
@@ -1964,6 +2005,17 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }
               } catch (e) {
                 console.warn("Parse car_daily_costs JSON error", e);
+              }
+            }
+            if (row.key === 'car_monthly_costs' && row.value) {
+              try {
+                const parsed = JSON.parse(row.value);
+                if (Array.isArray(parsed)) {
+                  setCarMonthlyCosts(parsed);
+                  localStorage.setItem('elbanna_car_monthly_costs', JSON.stringify(parsed));
+                }
+              } catch (e) {
+                console.warn("Parse car_monthly_costs JSON error", e);
               }
             }
             if (row.key === 'system_users' && row.value) {
@@ -2263,6 +2315,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         return {
           ...inv,
           invoice_number: invNum,
+          approval_status: inv.approval_status || 'approved',
           invoice_date: sanitizeDateStr(inv.invoice_date, "2026-06-07"),
           // لو الفاتورة مرتبطة بسيارة اتحذفت، نفك الربط (زي ON DELETE SET NULL) بدل ما الرفع كله يفشل
           car_id: (inv.car_id && sanitizedCars.some(c => c.id === inv.car_id)) ? inv.car_id : (null as any)
@@ -2912,6 +2965,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (carDailyCosts.some(c => c.car_id === id)) {
       persistCarDailyCosts(carDailyCosts.filter(c => c.car_id !== id));
     }
+    if (carMonthlyCosts.some(c => c.car_id === id)) {
+      persistCarMonthlyCosts(carMonthlyCosts.filter(c => c.car_id !== id));
+    }
     if (affectedInvoiceIds.length > 0) {
       setInvoices(prev => prev.map(inv => inv.car_id === id ? { ...inv, car_id: undefined } : inv));
     }
@@ -3537,6 +3593,12 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   // Create Invoice Transaction
+  // الفاتورة الجديدة بتتسجل "قيد موافقة المالية": مفيش خصم من العهدة ولا تحميل على تكلفة السيارة
+  // إلا بعد اعتمادها من شاشة "اعتماد فواتير التراخيص" (approveInvoice). الفواتير القديمة (من غير
+  // الحقل ده) بتتعامل كمعتمدة. بعد الاعتماد مفيش تعديل/حذف غير من أدمن البرنامج.
+  const isInvoiceApproved = (inv: Invoice) => (inv.approval_status || 'approved') === 'approved';
+  const INVOICE_LOCKED_MSG = 'الفاتورة معتمدة من المالية — التعديل أو الحذف عليها متاح لأدمن البرنامج فقط.';
+
   const createInvoice = (
     invoiceData: Omit<Invoice, 'id' | 'invoice_number' | 'version' | 'is_modified' | 'is_deleted'>,
     items: Omit<InvoiceItem, 'id' | 'invoice_id' | 'car_id'>[]
@@ -3566,6 +3628,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       };
     });
 
+    // تحقق مبدئي من كفاية الرصيد (الخصم الفعلي بيحصل وقت الاعتماد، وبيتراجع الرصيد وقتها تاني)
     for (const [accId, requiredAmount] of Object.entries(accountTotals)) {
       if (!accId) {
         return { success: false, error: 'عذرًا، لم يتم تحديد أو العثور على حساب الصرف المرتبط!' };
@@ -3579,32 +3642,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }
     }
 
-    const newCustodyAccounts = custodyAccounts.map(acc => {
-      const needed = accountTotals[acc.id];
-      if (needed) {
-        return { ...acc, balance: acc.balance - needed };
-      }
-      return acc;
-    });
-    const changedCustodyAccounts = newCustodyAccounts.filter(acc => accountTotals[acc.id]);
-    setCustodyAccounts(newCustodyAccounts);
-
-    const totalCashCharged = itemsWithAcc.filter(i => {
-      const match = custodyAccounts.find(ca => ca.id === i.account_id);
-      return match?.type === 'cash';
-    }).reduce((sum, item) => sum + item.amount, 0);
-
-    const totalVisaCharged = itemsWithAcc.filter(i => {
-      const match = custodyAccounts.find(ca => ca.id === i.account_id);
-      return match?.type !== 'cash';
-    }).reduce((sum, item) => sum + item.amount, 0);
-
-    const updatedOfficial = {
-      ...official,
-      cash_custody: official.cash_custody - totalCashCharged,
-      visa_custody: official.visa_custody - totalVisaCharged
-    };
-    setOfficials(prev => prev.map(o => o.id === invoiceData.official_id ? updatedOfficial : o));
+    const totalAmount = itemsWithAcc.reduce((sum, item) => sum + item.amount, 0);
 
     const invoiceNum = `INV-2026-${String(invoices.length + 1).padStart(4, '0')}`;
     const newInvoiceId = generateId("inv");
@@ -3615,7 +3653,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       version: 1,
       is_modified: false,
       is_deleted: false,
-      total_amount: totalCashCharged + totalVisaCharged
+      total_amount: totalAmount,
+      approval_status: 'pending'
     };
 
     const newItems: InvoiceItem[] = itemsWithAcc.map((itm, idx) => ({
@@ -3629,35 +3668,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     setInvoices(prev => [newInvoice, ...prev]);
     setInvoiceItems(prev => [...prev, ...newItems]);
 
-    // تسجيل إجمالي مصروف الترخيص على السيارة
-    if (invoiceData.car_id) {
-      const invoiceTotalAmount = totalCashCharged + totalVisaCharged;
-      setCars(prev => prev.map(car => {
-        if (car.id === invoiceData.car_id) {
-          return {
-            ...car,
-            license_total_cost: (car.license_total_cost || 0) + invoiceTotalAmount
-          };
-        }
-        return car;
-      }));
-    }
-
     const targetCarNumber = cars.find(c => c.id === invoiceData.car_id)?.car_number || "غير محدد";
-    const segmentMovements = Object.entries(accountTotals).map(([accId, amt]) => {
-      const acc = custodyAccounts.find(a => a.id === accId);
-      return {
-        id: generateId("cm"),
-        official_id: invoiceData.official_id,
-        from_account_id: accId,
-        date: invoiceData.invoice_date,
-        description: `صرف مصروفات سيارة ${targetCarNumber} بموجب فاتورة ${invoiceNum} (من حساب ${acc?.name})`,
-        amount: amt,
-        type: 'invoice_charge' as const
-      };
-    });
-    setCustodyMovements(prev => [...segmentMovements, ...prev]);
-
     const auditRecord: InvoiceAuditLog = {
       id: generateId("log"),
       invoice_id: newInvoiceId,
@@ -3666,7 +3677,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       supervisor_name: official.name,
       operation_type: "create",
       old_value: "لا يوجد (جديد)",
-      new_value: `توليد فاتورة سيارة ${targetCarNumber} بمبلغ ${newInvoice.total_amount} ج.م (بيان الترخيص: ${invoiceData.license_details || 'بدون'}).`
+      new_value: `توليد فاتورة سيارة ${targetCarNumber} بمبلغ ${newInvoice.total_amount} ج.م (بيان الترخيص: ${invoiceData.license_details || 'بدون'}) — بانتظار موافقة المالية.`
     };
     setAuditLogs(prev => [auditRecord, ...prev]);
 
@@ -3675,18 +3686,123 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       Promise.all([
         supabase.from('invoices').insert([newInvoice]),
         supabase.from('invoice_items').insert(newItems),
-        supabase.from('invoice_audit_logs').insert([auditRecord]),
-        supabase.from('custody_movements').insert(segmentMovements),
-        supabase.from('officials').update({
-          cash_custody: updatedOfficial.cash_custody,
-          visa_custody: updatedOfficial.visa_custody
-        }).eq('id', invoiceData.official_id),
-        changedCustodyAccounts.length > 0 ? supabase.from('custody_accounts').upsert(changedCustodyAccounts) : Promise.resolve()
+        supabase.from('invoice_audit_logs').insert([auditRecord])
       ]).catch(e => console.error("Supabase createInvoice error:", e));
     }
 
     return { success: true, invoice: newInvoice };
   };
+
+  // اعتماد المالية للفاتورة: هنا بس بيحصل الخصم من العهدة وتتحمّل تكلفة الترخيص على السيارة
+  const approveInvoice = (invoiceId: string): { success: boolean; error?: string } => {
+    const invoice = invoices.find(inv => inv.id === invoiceId);
+    if (!invoice || invoice.is_deleted) return { success: false, error: 'الفاتورة غير موجودة أو ملغاة!' };
+    if (isInvoiceApproved(invoice)) return { success: false, error: 'الفاتورة معتمدة بالفعل.' };
+    const official = officials.find(o => o.id === invoice.official_id);
+    if (!official) return { success: false, error: 'المسؤول عن الفاتورة لم يعد متاحًا!' };
+
+    const items = invoiceItems.filter(itm => itm.invoice_id === invoiceId);
+    if (items.length === 0) return { success: false, error: 'الفاتورة مفيهاش بنود!' };
+
+    const accountTotals: Record<string, number> = {};
+    for (const item of items) {
+      let accId = item.account_id || '';
+      if (!accId) {
+        const match = custodyAccounts.find(a => a.official_id === invoice.official_id && a.type === item.payment_method);
+        accId = match ? match.id : '';
+      }
+      if (!accId) return { success: false, error: 'مفيش حساب صرف محدد لأحد بنود الفاتورة!' };
+      accountTotals[accId] = (accountTotals[accId] || 0) + item.amount;
+    }
+
+    for (const [accId, required] of Object.entries(accountTotals)) {
+      const acc = custodyAccounts.find(a => a.id === accId);
+      if (!acc) return { success: false, error: 'لم يتم العثور على حساب الصرف المرتبط بالفاتورة!' };
+      if (acc.balance < required) {
+        return { success: false, error: `رصيد الحساب (${acc.name}) غير كافٍ للخصم! المتوفر: ${acc.balance} ج.م، المطلوب: ${required} ج.م.` };
+      }
+    }
+
+    const newCustodyAccounts = custodyAccounts.map(acc => {
+      const needed = accountTotals[acc.id];
+      return needed ? { ...acc, balance: acc.balance - needed } : acc;
+    });
+    const changedCustodyAccounts = newCustodyAccounts.filter(acc => accountTotals[acc.id]);
+    setCustodyAccounts(newCustodyAccounts);
+
+    let cashCharged = 0;
+    let visaCharged = 0;
+    Object.entries(accountTotals).forEach(([accId, amt]) => {
+      const acc = custodyAccounts.find(a => a.id === accId);
+      if (acc?.type === 'cash') cashCharged += amt; else visaCharged += amt;
+    });
+    const updatedOfficial = {
+      ...official,
+      cash_custody: official.cash_custody - cashCharged,
+      visa_custody: official.visa_custody - visaCharged
+    };
+    setOfficials(prev => prev.map(o => o.id === invoice.official_id ? updatedOfficial : o));
+
+    if (invoice.car_id) {
+      setCars(prev => prev.map(car => car.id === invoice.car_id
+        ? { ...car, license_total_cost: (car.license_total_cost || 0) + invoice.total_amount }
+        : car));
+    }
+
+    const approverName = currentUser?.name || currentUser?.username || 'المالية';
+    const approvedAt = new Date().toISOString();
+    const approvedInvoice: Invoice = { ...invoice, approval_status: 'approved', approved_by: approverName, approved_at: approvedAt };
+    setInvoices(prev => prev.map(inv => inv.id === invoiceId ? approvedInvoice : inv));
+
+    const targetCarNumber = cars.find(c => c.id === invoice.car_id)?.car_number || "غير محدد";
+    const chargeMovements = Object.entries(accountTotals).map(([accId, amt]) => {
+      const acc = custodyAccounts.find(a => a.id === accId);
+      return {
+        id: generateId("cm"),
+        official_id: invoice.official_id,
+        from_account_id: accId,
+        date: approvedAt.split('T')[0],
+        description: `خصم مصروفات سيارة ${targetCarNumber} بموجب فاتورة ${invoice.invoice_number} بعد موافقة المالية (من حساب ${acc?.name})`,
+        amount: amt,
+        type: 'invoice_charge' as const
+      };
+    });
+    setCustodyMovements(prev => [...chargeMovements, ...prev]);
+
+    const auditRecord: InvoiceAuditLog = {
+      id: generateId("log"),
+      invoice_id: invoiceId,
+      invoice_number: invoice.invoice_number,
+      timestamp: approvedAt,
+      supervisor_name: approverName,
+      operation_type: "edit",
+      old_value: "قيد موافقة المالية",
+      new_value: `موافقة المالية وخصم ${invoice.total_amount} ج.م من العهدة (اعتمدها: ${approverName}).`
+    };
+    setAuditLogs(prev => [auditRecord, ...prev]);
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      Promise.all([
+        supabase.from('invoices').update({ approval_status: 'approved', approved_by: approverName, approved_at: approvedAt }).eq('id', invoiceId),
+        supabase.from('invoice_audit_logs').insert([auditRecord]),
+        supabase.from('custody_movements').insert(chargeMovements),
+        supabase.from('officials').update({
+          cash_custody: updatedOfficial.cash_custody,
+          visa_custody: updatedOfficial.visa_custody
+        }).eq('id', invoice.official_id),
+        changedCustodyAccounts.length > 0 ? supabase.from('custody_accounts').upsert(changedCustodyAccounts) : Promise.resolve()
+      ]).catch(e => console.error("Supabase approveInvoice error:", e));
+    }
+
+    return { success: true };
+  };
+
+  // تكلفة التراخيص المعتمدة لسيارة في يوم معيّن (مصدر واحد حي لشاشات تكاليف وربحية السيارات)
+  const getLicenseCostForCarDay = (carId: string, date: string): number =>
+    invoices
+      .filter(inv => !inv.is_deleted && isInvoiceApproved(inv) && inv.car_id === carId && inv.invoice_date === date)
+      .reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
 
   // Update Invoice logic
   const updateInvoice = (
@@ -3709,6 +3825,60 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const official = officials.find(o => o.id === oldInvoice.official_id);
     if (!official) {
       return { success: false, error: "المسؤول عن الفاتورة لم يعد متاحًا!" };
+    }
+
+    if (isInvoiceApproved(oldInvoice) && currentUser?.role !== 'admin') {
+      return { success: false, error: INVOICE_LOCKED_MSG };
+    }
+
+    // فاتورة لسه قيد الموافقة: التعديل عليها مالوش أي أثر على العهدة (لسه ماتخصمتش)
+    if (!isInvoiceApproved(oldInvoice)) {
+      const pendingItems = newItems.map((itm) => {
+        let accId = itm.account_id;
+        if (!accId) {
+          const found = custodyAccounts.find(a => a.official_id === oldInvoice.official_id && a.type === itm.payment_method)
+            || custodyAccounts.find(a => a.official_id === oldInvoice.official_id);
+          accId = found ? found.id : '';
+        }
+        return { ...itm, account_id: accId };
+      });
+      const pendingTotal = pendingItems.reduce((sum, item) => sum + item.amount, 0);
+      const pendingInvoice: Invoice = {
+        ...oldInvoice,
+        ...headerData,
+        version: oldInvoice.version + 1,
+        is_modified: true,
+        total_amount: pendingTotal
+      };
+      const pendingMapped: InvoiceItem[] = pendingItems.map((itm, index) => ({
+        ...itm,
+        id: generateId("item_mod"),
+        invoice_id: invoiceId,
+        car_id: headerData?.car_id || oldInvoice.car_id || '',
+        sort_order: index
+      }));
+      setInvoices(prev => prev.map(inv => inv.id === invoiceId ? pendingInvoice : inv));
+      setInvoiceItems(prev => [...prev.filter(itm => itm.invoice_id !== invoiceId), ...pendingMapped]);
+      const pendingAudit: InvoiceAuditLog = {
+        id: generateId("log"),
+        invoice_id: invoiceId,
+        invoice_number: oldInvoice.invoice_number,
+        timestamp: new Date().toISOString(),
+        supervisor_name: supervisorName,
+        operation_type: "edit",
+        old_value: `القيمة القديمة: ${oldInvoice.total_amount} ج.م (نسخة رقم ${oldInvoice.version}) — قيد الموافقة`,
+        new_value: `تعديل القيمة إلى: ${pendingTotal} ج.م (نسخة رقم ${pendingInvoice.version}) — لسه بانتظار موافقة المالية، بدون أثر على العهدة.`
+      };
+      setAuditLogs(prev => [pendingAudit, ...prev]);
+      const sb = getSupabaseClient();
+      if (sb && isCloudConnected) {
+        Promise.all([
+          sb.from('invoices').update(pendingInvoice).eq('id', invoiceId),
+          sb.from('invoice_items').delete().eq('invoice_id', invoiceId).then(() => sb.from('invoice_items').insert(pendingMapped)),
+          sb.from('invoice_audit_logs').insert([pendingAudit])
+        ]).catch(e => console.error("Supabase updateInvoice (pending) error:", e));
+      }
+      return { success: true };
     }
 
     // Existing old items
@@ -3882,6 +4052,32 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (!invoice || invoice.is_deleted) {
       return { success: false, error: "الفاتورة غير موجودة أو تم حذفها مسبقًا!" };
     }
+    if (isInvoiceApproved(invoice) && currentUser?.role !== 'admin') {
+      return { success: false, error: INVOICE_LOCKED_MSG };
+    }
+    // فاتورة قيد الموافقة: إلغاء بدون استرداد لأنها ماتخصمتش أصلًا
+    if (!isInvoiceApproved(invoice)) {
+      setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, is_deleted: true } : inv));
+      const pendingDelAudit: InvoiceAuditLog = {
+        id: generateId("log"),
+        invoice_id: invoiceId,
+        invoice_number: invoice.invoice_number,
+        timestamp: new Date().toISOString(),
+        supervisor_name: supervisorName,
+        operation_type: "delete",
+        old_value: `إجمالي الفاتورة الملغاة: ${invoice.total_amount} ج.م`,
+        new_value: 'تم إلغاء الفاتورة وهي قيد موافقة المالية (بدون أي أثر على العهدة).'
+      };
+      setAuditLogs(prev => [pendingDelAudit, ...prev]);
+      const sb = getSupabaseClient();
+      if (sb && isCloudConnected) {
+        Promise.all([
+          sb.from('invoices').update({ is_deleted: true }).eq('id', invoiceId),
+          sb.from('invoice_audit_logs').insert([pendingDelAudit])
+        ]).catch(e => console.error("Supabase deleteInvoice (pending) error:", e));
+      }
+      return { success: true };
+    }
 
     const items = invoiceItems.filter(itm => itm.invoice_id === invoiceId);
 
@@ -3985,6 +4181,32 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const invoice = invoices.find(inv => inv.id === invoiceId);
     if (!invoice) return { success: false, error: 'لم يتم العثور على الفاتورة!' };
     if (!invoice.is_deleted) return { success: false, error: 'الفاتورة نشطة بالفعل وليست ملغاة!' };
+    if (isInvoiceApproved(invoice) && currentUser?.role !== 'admin') {
+      return { success: false, error: INVOICE_LOCKED_MSG };
+    }
+    // فاتورة قيد الموافقة: استعادة بدون خصم (الخصم بيحصل وقت الاعتماد)
+    if (!isInvoiceApproved(invoice)) {
+      setInvoices(prev => prev.map(inv => inv.id === invoiceId ? { ...inv, is_deleted: false } : inv));
+      const pendingRestoreAudit: InvoiceAuditLog = {
+        id: generateId("log"),
+        invoice_id: invoiceId,
+        invoice_number: invoice.invoice_number,
+        timestamp: new Date().toISOString(),
+        supervisor_name: supervisorName,
+        operation_type: "create",
+        old_value: "ملغاة ومحذوفة",
+        new_value: 'تمت استعادة الفاتورة وهي بانتظار موافقة المالية (بدون خصم من العهدة).'
+      };
+      setAuditLogs(prev => [pendingRestoreAudit, ...prev]);
+      const sb = getSupabaseClient();
+      if (sb && isCloudConnected) {
+        Promise.all([
+          sb.from('invoices').update({ is_deleted: false }).eq('id', invoiceId),
+          sb.from('invoice_audit_logs').insert([pendingRestoreAudit])
+        ]).catch(e => console.error("Supabase restoreInvoice (pending) error:", e));
+      }
+      return { success: true };
+    }
 
     const items = invoiceItems.filter(i => i.invoice_id === invoiceId);
 
@@ -4101,13 +4323,17 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const purgeInvoice = (invoiceId: string, supervisorName: string): { success: boolean; error?: string } => {
     const invoice = invoices.find(inv => inv.id === invoiceId);
     if (!invoice) return { success: false, error: 'لم يتم العثور على الفاتورة!' };
+    if (isInvoiceApproved(invoice) && currentUser?.role !== 'admin') {
+      return { success: false, error: INVOICE_LOCKED_MSG };
+    }
 
     // If the invoice is NOT deleted yet, process refund/balance corrections first
     let changedCustodyAccounts: CustodyAccount[] = [];
     let refundMovements: any[] = [];
     let updatedOfficial: Official | undefined;
 
-    if (!invoice.is_deleted) {
+    // الفاتورة قيد الموافقة ماتخصمتش من العهدة، فمفيش استرداد ليها
+    if (!invoice.is_deleted && isInvoiceApproved(invoice)) {
       const items = invoiceItems.filter(itm => itm.invoice_id === invoiceId);
 
       const refunds: Record<string, number> = {};
@@ -4648,6 +4874,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         deleteMovement,
         editMovementAmount,
         createInvoice,
+        approveInvoice,
+        getLicenseCostForCarDay,
         updateInvoice,
         deleteInvoice,
         restoreInvoice,
@@ -4681,6 +4909,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         upsertTransportRequestCost,
         deleteTransportRequestCost,
         carDailyCosts,
+        carMonthlyCosts,
+        upsertCarMonthlyCost,
+        deleteCarMonthlyCost,
         upsertCarDailyCost,
         deleteCarDailyCost,
         resetToInitial,
