@@ -44,6 +44,15 @@ const STATUS_COLORS: Record<MaintenanceRequestStatus, string> = {
   closed: 'bg-slate-100 text-slate-500 border-slate-200',
 };
 
+// ====== التأخير في المراحل: الطلب اللي قاعد في نفس المرحلة أكتر من عدد أيام (بيتحدد من القايمة) بيتعلّم "متأخر" ======
+const getDelayDays = () => parseInt(localStorage.getItem('elbanna_maint_delay_days') || '3', 10) || 3;
+const stageSince = (r: MaintenanceRequest): string => {
+  const h = r.stage_history || [];
+  for (let i = h.length - 1; i >= 0; i--) if (h[i].status === r.status) return h[i].at.slice(0, 10);
+  return r.request_date;
+};
+const daysInStage = (r: MaintenanceRequest): number => Math.max(0, Math.floor((Date.now() - new Date(stageSince(r)).getTime()) / 86400000));
+
 // ====== أوضاع الشاشة: كل مستلم طلب ليه شاشة مستقلة بترى الطلبات المنتظرة منه بس ======
 // full = الشاشة الكاملة القديمة (للأدمن)، والباقي شاشات الأدوار
 export type MaintenanceMode = 'full' | 'requests' | 'parts' | 'execution' | 'review' | 'accounting';
@@ -61,6 +70,7 @@ export function MaintenanceTab({ mode = 'full' }: { mode?: MaintenanceMode }) {
   const db = useDb();
   const cfg = MODE_CONFIG[mode];
   const [scope, setScope] = useState<'inbox' | 'all'>('inbox');
+  const [delayDays, setDelayDays] = useState<number>(getDelayDays());
   const [view, setView] = useState<'list' | 'new' | 'detail'>('list');
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -141,6 +151,17 @@ export function MaintenanceTab({ mode = 'full' }: { mode?: MaintenanceMode }) {
             </div>
           </div>
 
+          <div className="flex items-center gap-2 text-[11px] text-slate-500">
+            <span>اعتبار الطلب متأخر لو قعد في مرحلته أكتر من</span>
+            <select
+              value={delayDays}
+              onChange={(e) => { const v = parseInt(e.target.value, 10); setDelayDays(v); localStorage.setItem('elbanna_maint_delay_days', String(v)); }}
+              className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700"
+            >
+              {[1, 2, 3, 5, 7, 14].map(d => <option key={d} value={d}>{d} يوم</option>)}
+            </select>
+            <span>({filteredRequests.filter(r => r.status !== 'closed' && daysInStage(r) >= delayDays).length} متأخر في القايمة دي)</span>
+          </div>
           <div className="space-y-2.5">
             {filteredRequests.map(r => {
               const car = carFor(r.car_id);
@@ -154,6 +175,9 @@ export function MaintenanceTab({ mode = 'full' }: { mode?: MaintenanceMode }) {
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1"><Calendar className="w-3 h-3" /> {r.request_date}</span>
                     <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${STATUS_COLORS[r.status]}`}>{STATUS_LABELS[r.status]}</span>
+                    {r.status !== 'closed' && daysInStage(r) >= delayDays && (
+                      <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border bg-rose-50 text-rose-700 border-rose-200" title="قاعد في المرحلة دي أكتر من المدة المحددة">متأخر {daysInStage(r)} يوم</span>
+                    )}
                   </div>
                 </button>
               );
@@ -347,9 +371,7 @@ function MaintenanceRequestDetail({ request, onToast, mode }: { request: Mainten
   const handleReturnToExecution = () => {
     const reason = (window.prompt('سبب إرجاع الطلب للتنفيذ:') || '').trim();
     if (!reason) return;
-    const stamp = new Date().toISOString().split('T')[0];
-    const note = `\n[إرجاع من المراجعة ${stamp}: ${reason}]`;
-    db.updateMaintenanceRequest(request.id, { status: 'in_progress', work_performed: (request.work_performed || '') + note });
+    db.updateMaintenanceRequest(request.id, { status: 'in_progress', _kind: 'return', _note: reason });
     onToast('تم إرجاع الطلب للتنفيذ مع السبب.');
   };
 
@@ -364,7 +386,20 @@ function MaintenanceRequestDetail({ request, onToast, mode }: { request: Mainten
             <p className="font-mono text-slate-400 text-xs">{request.request_number}</p>
             <h3 className="font-black text-slate-800 text-lg flex items-center gap-2"><Truck className="w-5 h-5 text-slate-400" /> {car?.car_number || '—'}</h3>
           </div>
-          <span className={`text-xs font-bold px-3 py-1.5 rounded-full border ${STATUS_COLORS[request.status]}`}>{STATUS_LABELS[request.status]}</span>
+          <div className="flex items-center gap-2">
+            {request.status !== 'closed' && daysInStage(request) >= getDelayDays() && (
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full border bg-rose-50 text-rose-700 border-rose-200">متأخر {daysInStage(request)} يوم في المرحلة</span>
+            )}
+            <button
+              type="button"
+              onClick={() => window.open('https://wa.me/?text=' + encodeURIComponent(`طلب صيانة ${request.request_number} — سيارة ${car?.car_number || ''}\nالمرحلة: ${STATUS_LABELS[request.status]}\nالعطل: ${request.fault_description}`), '_blank')}
+              className="text-[11px] font-bold px-2.5 py-1.5 rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+              title="فتح رسالة واتساب جاهزة بتفاصيل الطلب"
+            >
+              إبلاغ واتساب
+            </button>
+            <span className={`text-xs font-bold px-3 py-1.5 rounded-full border ${STATUS_COLORS[request.status]}`}>{STATUS_LABELS[request.status]}</span>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-6 gap-2.5 text-[11px] bg-slate-50 border border-slate-100 rounded-xl p-3">
@@ -381,6 +416,35 @@ function MaintenanceRequestDetail({ request, onToast, mode }: { request: Mainten
           <div><p className="text-slate-400 font-bold flex items-center gap-1"><Building2 className="w-3 h-3" /> جهة الصيانة</p><p className="font-bold text-slate-700">{request.workshop_type === 'external' ? `ورشة خارجية: ${request.workshop_name}` : 'داخل الشركة'}</p></div>
           <div><p className="text-slate-400 font-bold">تاريخ الطلب</p><p className="font-bold text-slate-700 font-mono">{request.request_date}</p></div>
         </div>
+
+        {(() => {
+          const hist = request.stage_history || [];
+          const last = hist[hist.length - 1];
+          return (
+            <>
+              {last && last.kind === 'return' && last.status === request.status && (
+                <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-4 py-3 text-xs font-bold">
+                  تم إرجاع الطلب للمرحلة دي{last.by ? ` بواسطة ${last.by}` : ''}: {last.note}
+                </div>
+              )}
+              {hist.length > 0 && (
+                <div className="border border-slate-100 rounded-xl p-3 bg-slate-50 space-y-2">
+                  <p className="text-[11px] font-bold text-slate-500">سجل المراحل (في المرحلة الحالية من {daysInStage(request)} يوم)</p>
+                  <ol className="space-y-1.5">
+                    {hist.map((h, i) => (
+                      <li key={i} className={`text-[11px] flex flex-wrap items-center gap-x-2 ${h.kind === 'return' ? 'text-rose-700' : 'text-slate-600'}`}>
+                        <span className="font-bold">{h.kind === 'return' ? 'إرجاع إلى' : h.kind === 'create' ? 'تسجيل الطلب —' : 'نقل إلى'} {STATUS_LABELS[h.status]}</span>
+                        <span className="font-mono text-slate-400">{h.at.replace('T', ' ').slice(0, 16)}</span>
+                        {h.by && <span className="text-slate-400">بواسطة {h.by}</span>}
+                        {h.note && <span className="w-full font-bold">السبب: {h.note}</span>}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {carHistory.length > 0 && (
           <div className="pt-2 border-t border-slate-100">

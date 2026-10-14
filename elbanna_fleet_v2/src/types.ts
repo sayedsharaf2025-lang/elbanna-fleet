@@ -94,9 +94,12 @@ export interface Invoice {
   license_details?: string; // بيان الترخيص
   license_location?: string; // مكان الترخيص
   car_location?: string; // مكان السيارة
-  approval_status?: 'pending' | 'approved'; // قيد موافقة المالية / معتمدة (الفواتير القديمة تعتبر معتمدة)
+  approval_status?: 'pending' | 'approved' | 'returned'; // قيد موافقة المالية / معتمدة (الفواتير القديمة تعتبر معتمدة)
   approved_by?: string; // اسم من اعتمد الفاتورة
   approved_at?: string; // وقت الاعتماد
+  return_reason?: string; // سبب إرجاع المالية للفاتورة
+  returned_by?: string;
+  returned_at?: string;
 }
 
 export interface CustodyAccount {
@@ -166,6 +169,34 @@ export interface TransportRequestCost {
   id: string;
   request_id: string;
   legs: TransportRouteLegSmoke[]; // دخان كل محطة في خط سير الطلب بالترتيب
+  updated_at: string;
+  updated_by?: string;
+}
+
+// تموين سولار لسيارة (لترات + سعر + قراءة العدّاد اختيارية)
+export interface FuelLog {
+  id: string;
+  car_id: string;
+  date: string; // YYYY-MM-DD
+  liters: number;
+  price_per_liter: number;
+  total_amount: number;
+  odometer_km?: number; // قراءة عدّاد السيارة وقت التموين (اختياري)
+  driver_id?: string;
+  note?: string;
+  updated_at: string;
+  updated_by?: string;
+}
+
+// خطة صيانة وقائية لسيارة (مثلًا: تغيير زيت كل 10,000 كم)
+export interface ServicePlan {
+  id: string;
+  car_id: string;
+  name: string;
+  interval_km: number;
+  last_done_km?: number; // قراءة العدّاد وقت آخر تنفيذ (اختياري)
+  last_done_date?: string; // تاريخ آخر تنفيذ
+  note?: string;
   updated_at: string;
   updated_by?: string;
 }
@@ -247,6 +278,15 @@ export interface MaintenancePartItem {
   quantity: number;
 }
 
+// سجل مراحل طلب الصيانة: كل نقل أو إرجاع بيتسجل بتاريخه واسم اللي عمله وسبب الإرجاع
+export interface MaintenanceStageEntry {
+  status: MaintenanceRequestStatus;
+  at: string; // ISO
+  by?: string;
+  kind: 'create' | 'advance' | 'return';
+  note?: string;
+}
+
 export interface MaintenanceRequest {
   id: string;
   request_number: string; // رقم طلب الصيانة
@@ -261,6 +301,7 @@ export interface MaintenanceRequest {
   work_performed: string; // الأعمال التي تم تنفيذها (وصف حر يتراكم مع تقدم الحالة)
   created_by?: string; // اسم المستخدم اللي سجل الطلب
   invoice_id?: string; // الفاتورة المرتبطة بالطلب لو اتعملت
+  stage_history?: MaintenanceStageEntry[]; // سجل المراحل (نقل/إرجاع/سبب)
 }
 
 // بند في فاتورة الصيانة — قطع غيار (منسوخة تلقائيًا من طلب الصيانة) أو مصنعية (المحاسب بيضيفها يدويًا)

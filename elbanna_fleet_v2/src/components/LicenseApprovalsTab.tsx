@@ -11,7 +11,7 @@ import { FileCheck, Truck, User, CalendarDays, CheckCircle, AlertTriangle, Searc
 // المبلغ من عهدة المسؤول وبيتحمّل على تكلفة السيارة، وبعدها الفاتورة بتتقفل (التعديل لأدمن البرنامج بس)
 export function LicenseApprovalsTab() {
   const db = useDb();
-  const [tab, setTab] = useState<'pending' | 'approved'>('pending');
+  const [tab, setTab] = useState<'pending' | 'approved' | 'returned'>('pending');
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null);
 
@@ -20,11 +20,17 @@ export function LicenseApprovalsTab() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const statusOf = (inv: { approval_status?: 'pending' | 'approved' }) => inv.approval_status || 'approved';
+  const statusOf = (inv: { approval_status?: 'pending' | 'approved' | 'returned' }) => inv.approval_status || 'approved';
 
   const pending = useMemo(
     () => db.invoices.filter(i => !i.is_deleted && statusOf(i) === 'pending')
       .sort((a, b) => (b.invoice_date || '').localeCompare(a.invoice_date || '')),
+    [db.invoices]
+  );
+
+  const returned = useMemo(
+    () => db.invoices.filter(i => !i.is_deleted && statusOf(i) === 'returned')
+      .sort((a, b) => (b.returned_at || '').localeCompare(a.returned_at || '')),
     [db.invoices]
   );
 
@@ -64,7 +70,15 @@ export function LicenseApprovalsTab() {
     else showToast(res.error || 'تعذّرت الموافقة على الفاتورة.', false);
   };
 
-  const list = (tab === 'pending' ? pending : approved).filter(matches);
+  const handleReturn = (invoiceId: string, number: string) => {
+    const reason = (window.prompt(`سبب إرجاع الفاتورة ${number} لمستخدم التراخيص:`) || '').trim();
+    if (!reason) return;
+    const res = db.returnInvoice(invoiceId, reason);
+    if (res.success) showToast(`تم إرجاع الفاتورة ${number} لمستخدم التراخيص بالسبب المكتوب.`, true);
+    else showToast(res.error || 'تعذّر إرجاع الفاتورة.', false);
+  };
+
+  const list = (tab === 'pending' ? pending : tab === 'returned' ? returned : approved).filter(matches);
   const shown = tab === 'approved' ? list.slice(0, 50) : list;
 
   return (
@@ -82,6 +96,7 @@ export function LicenseApprovalsTab() {
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => setTab('pending')} className={`text-xs font-bold px-4 py-2 rounded-lg border ${tab === 'pending' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-200'}`}>بانتظار الموافقة ({pending.length})</button>
         <button type="button" onClick={() => setTab('approved')} className={`text-xs font-bold px-4 py-2 rounded-lg border ${tab === 'approved' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-slate-600 border-slate-200'}`}>المعتمدة ({approved.length})</button>
+        <button type="button" onClick={() => setTab('returned')} className={`text-xs font-bold px-4 py-2 rounded-lg border ${tab === 'returned' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-200'}`}>مرتجعة ({returned.length})</button>
         <div className="relative flex-1 min-w-[200px]">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="بحث برقم الفاتورة أو السيارة أو المسؤول" className="w-full pr-9 pl-3 py-2 rounded-lg border border-slate-200 text-xs focus:outline-none focus:border-emerald-500 bg-white text-slate-800" />
@@ -137,9 +152,16 @@ export function LicenseApprovalsTab() {
                     <button type="button" disabled={!allEnough} onClick={() => handleApprove(inv.id, inv.invoice_number, inv.total_amount)} className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5">
                       <CheckCircle className="w-3.5 h-3.5" /> موافقة وخصم من العهدة
                     </button>
+                    <button type="button" onClick={() => handleReturn(inv.id, inv.invoice_number)} className="bg-white border border-rose-300 text-rose-600 hover:bg-rose-50 font-bold text-xs px-4 py-2 rounded-lg">
+                      إرجاع بسبب
+                    </button>
                     {!allEnough && <span className="text-[11px] text-rose-600 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> الرصيد لا يكفي — اشحن العهدة الأول.</span>}
                   </div>
                 </div>
+              ) : tab === 'returned' ? (
+                <p className="text-[11px] text-rose-700 pt-2 border-t border-slate-100 leading-relaxed">
+                  مرتجعة{inv.returned_by ? ` بواسطة ${inv.returned_by}` : ''}{inv.returned_at ? ` في ${inv.returned_at.split('T')[0]}` : ''}: <b>{inv.return_reason || 'بدون سبب مسجّل'}</b> — مستنية مستخدم التراخيص يعدّلها ويعيد إرسالها.
+                </p>
               ) : (
                 <p className="text-[11px] text-slate-500 pt-2 border-t border-slate-100 flex items-center gap-1.5">
                   <Lock className="w-3.5 h-3.5" /> معتمدة{inv.approved_by ? ` بواسطة ${inv.approved_by}` : ''}{inv.approved_at ? ` في ${inv.approved_at.split('T')[0]}` : ''} — مقفولة للتعديل (أدمن البرنامج فقط).
@@ -150,7 +172,7 @@ export function LicenseApprovalsTab() {
         })}
         {shown.length === 0 && (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-10 text-center text-slate-400 font-bold">
-            {tab === 'pending' ? 'لا توجد فواتير بانتظار الموافقة.' : 'لا توجد فواتير معتمدة مطابقة.'}
+            {tab === 'pending' ? 'لا توجد فواتير بانتظار الموافقة.' : tab === 'returned' ? 'لا توجد فواتير مرتجعة.' : 'لا توجد فواتير معتمدة مطابقة.'}
           </div>
         )}
         {tab === 'approved' && list.length > 50 && (

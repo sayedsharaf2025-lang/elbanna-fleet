@@ -25,7 +25,12 @@ import { MaintenanceTab } from './components/MaintenanceTab';
 import { VehicleProfitabilityTab } from './components/VehicleProfitabilityTab';
 import { LicenseApprovalsTab } from './components/LicenseApprovalsTab';
 import { CarMonthlyCostsTab } from './components/CarMonthlyCostsTab';
+import { DriverReportsTab } from './components/DriverReportsTab';
+import { FuelLogsTab } from './components/FuelLogsTab';
+import { ServicePlansTab } from './components/ServicePlansTab';
 import { BackupButton } from './components/BackupButton';
+import { CommandPalette } from './components/CommandPalette';
+import { isPaletteShortcut, isSaveShortcut, triggerSave } from './utils/shortcuts';
 import {
   LayoutDashboard,
   Truck,
@@ -53,6 +58,7 @@ import {
   Package,
   FileCheck,
   Wallet,
+  BarChart3,
   ChevronDown,
   TrendingUp
 } from 'lucide-react';
@@ -72,11 +78,13 @@ function DashboardLayout() {
     return user.allowedScreens || [];
   }, [db.currentUser, db.systemUsers]);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance' | 'maintenance_requests' | 'maintenance_parts' | 'maintenance_execution' | 'maintenance_review' | 'maintenance_accounting' | 'license_invoice_approvals' | 'car_monthly_costs' | 'vehicle_profitability'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance' | 'maintenance_requests' | 'maintenance_parts' | 'maintenance_execution' | 'maintenance_review' | 'maintenance_accounting' | 'license_invoice_approvals' | 'car_monthly_costs' | 'driver_reports' | 'fuel_logs' | 'service_plans' | 'vehicle_profitability'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   // المجموعة المفتوحة حاليًا في القايمة الجانبية (واحدة بس مفتوحة في كل مرة)
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [showConsole, setShowConsole] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  const [saveHint, setSaveHint] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Enforce redirection to allowed tabs as role switches or updates
@@ -85,6 +93,26 @@ function DashboardLayout() {
       setActiveTab(allowedTabs[0] as any);
     }
   }, [allowedTabs, activeTab]);
+
+  // اختصارات: Ctrl+S = حفظ الشاشة الحالية (بدل نافذة حفظ الصفحة في المتصفح)، Ctrl+K = بحث سريع عن أي شاشة
+  useEffect(() => {
+    let hintTimer: ReturnType<typeof setTimeout>;
+    const onKey = (e: KeyboardEvent) => {
+      if (isSaveShortcut(e)) {
+        e.preventDefault();
+        if (!triggerSave()) {
+          setSaveHint('مفيش حاجة تتحفظ في الشاشة دي — الحفظ بـ Ctrl+S شغال في شاشات جداول الإدخال.');
+          clearTimeout(hintTimer);
+          hintTimer = setTimeout(() => setSaveHint(null), 3500);
+        }
+      } else if (isPaletteShortcut(e)) {
+        e.preventDefault();
+        setShowPalette(p => !p);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); clearTimeout(hintTimer); };
+  }, []);
 
   // Real-time Clock loop
   useEffect(() => {
@@ -144,6 +172,9 @@ function DashboardLayout() {
         { id: 'route_accounting' as const, label: 'حساب خطوط السير', icon: Route },
         { id: 'car_daily_costs' as const, label: 'مصاريف وأرباح السيارات اليومية', icon: Gauge },
         { id: 'car_monthly_costs' as const, label: 'المرتبات والسولار والزيت الشهرية', icon: Wallet },
+        { id: 'driver_reports' as const, label: 'تقارير السائقين وتكلفة الكيلو', icon: BarChart3 },
+        { id: 'fuel_logs' as const, label: 'سجل التموين', icon: Fuel },
+        { id: 'service_plans' as const, label: 'الصيانة الوقائية', icon: ClipboardList },
         { id: 'vehicle_profitability' as const, label: 'ربحية السيارات', icon: TrendingUp },
         { id: 'custody_licensing' as const, label: 'فواتير تراخيص', icon: Receipt },
         { id: 'license_invoice_approvals' as const, label: 'اعتماد فواتير التراخيص', icon: FileCheck },
@@ -169,6 +200,49 @@ function DashboardLayout() {
       ]
     },
   ];
+
+  // قايمة الشاشات المسموحة للمستخدم (للبحث السريع Ctrl+K)
+  const paletteItems = navStructure.flatMap(entry =>
+    entry.type === 'standalone'
+      ? (allowedTabs.includes(entry.id) ? [{ id: entry.id as string, label: entry.label, group: 'الرئيسية' }] : [])
+      : entry.items.filter(i => allowedTabs.includes(i.id)).map(i => ({ id: i.id as string, label: i.label, group: entry.label }))
+  );
+
+  // تسجيل خروج تلقائي بعد فترة خمول (٣٠ دقيقة) — بيشتغل كمان لو الموبايل كان في الخلفية
+  useEffect(() => {
+    const LIMIT_MS = 30 * 60 * 1000;
+    const KEY = 'elbanna_last_activity';
+    const now = () => Date.now();
+    const stored = parseInt(localStorage.getItem(KEY) || '0', 10);
+    if (stored && now() - stored > LIMIT_MS) {
+      db.logout();
+      return;
+    }
+    let lastWrite = 0;
+    const bump = () => {
+      const t = now();
+      if (t - lastWrite > 10000) {
+        lastWrite = t;
+        localStorage.setItem(KEY, String(t));
+      }
+    };
+    bump();
+    const check = () => {
+      const last = parseInt(localStorage.getItem(KEY) || '0', 10);
+      if (last && now() - last > LIMIT_MS) db.logout();
+    };
+    const events = ['pointerdown', 'keydown', 'touchstart', 'scroll'];
+    events.forEach(e => window.addEventListener(e, bump, { passive: true }));
+    const timer = setInterval(check, 30000);
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      events.forEach(e => window.removeEventListener(e, bump));
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // عدّادات الطلبات المنتظرة على القايمة الجانبية
   const maintCount = (statuses: string[]) => db.maintenanceRequests.filter(r => statuses.includes(r.status)).length;
@@ -245,6 +319,15 @@ function DashboardLayout() {
               <Clock className="w-3.5 h-3.5 text-slate-500" />
               <span>{currentTime.toLocaleTimeString('ar-EG')}</span>
             </div>
+
+            <button
+              onClick={() => setShowPalette(true)}
+              type="button"
+              className="hidden md:flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-slate-200 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800"
+              title="بحث سريع عن أي شاشة"
+            >
+              بحث سريع <span className="font-mono text-slate-500">Ctrl+K</span>
+            </button>
 
             <BackupButton />
 
@@ -445,6 +528,9 @@ function DashboardLayout() {
             {activeTab === 'car_daily_costs' && <CarDailyCostsTab />}
             {activeTab === 'license_invoice_approvals' && <LicenseApprovalsTab />}
             {activeTab === 'car_monthly_costs' && <CarMonthlyCostsTab />}
+            {activeTab === 'driver_reports' && <DriverReportsTab />}
+            {activeTab === 'fuel_logs' && <FuelLogsTab />}
+            {activeTab === 'service_plans' && <ServicePlansTab />}
             {activeTab === 'maintenance' && <MaintenanceTab />}
             {activeTab === 'maintenance_requests' && <MaintenanceTab mode="requests" />}
             {activeTab === 'maintenance_parts' && <MaintenanceTab mode="parts" />}
@@ -456,6 +542,16 @@ function DashboardLayout() {
         </main>
 
       </div>
+
+      <CommandPalette
+        items={paletteItems}
+        open={showPalette}
+        onClose={() => setShowPalette(false)}
+        onSelect={(id) => { setActiveTab(id as any); setIsSidebarOpen(false); }}
+      />
+      {saveHint && (
+        <div className="fixed bottom-14 left-1/2 -translate-x-1/2 z-[90] bg-slate-800 border border-slate-600 text-slate-200 text-xs font-bold px-4 py-2.5 rounded-xl shadow-xl no-print">{saveHint}</div>
+      )}
 
       {/* FOOTER BAR */}
       <footer className="fixed bottom-0 left-0 right-0 h-10 border-t border-slate-800 bg-slate-900 no-print flex items-center justify-between px-6 z-40 text-[10px] text-slate-500 select-none">

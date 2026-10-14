@@ -313,6 +313,71 @@ CREATE TABLE IF NOT EXISTS maintenance_invoices (
   created_by VARCHAR(100)
 );
 
+-- 14b. جداول تكاليف السيارات (مصاريف يومية + مرتب وسولار وزيت شهرية) — صف لكل سجل
+CREATE TABLE IF NOT EXISTS car_daily_costs (
+  id TEXT PRIMARY KEY,
+  car_id TEXT NOT NULL,
+  date DATE NOT NULL,
+  total_distance_km NUMERIC(12,2) DEFAULT 0,
+  freight_amount NUMERIC(12,2) DEFAULT 0,
+  cards_amount NUMERIC(12,2) DEFAULT 0,
+  violations_amount NUMERIC(12,2) DEFAULT 0,
+  tire_wash_amount NUMERIC(12,2) DEFAULT 0,
+  maintenance_amount NUMERIC(12,2) DEFAULT 0,
+  extra_costs JSONB DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_by VARCHAR(100),
+  CONSTRAINT unique_car_daily UNIQUE (car_id, date)
+);
+
+CREATE TABLE IF NOT EXISTS car_monthly_costs (
+  id TEXT PRIMARY KEY,
+  car_id TEXT NOT NULL,
+  month VARCHAR(7) NOT NULL,
+  driver_id TEXT,
+  salary_amount NUMERIC(12,2) DEFAULT 0,
+  diesel_amount NUMERIC(12,2) DEFAULT 0,
+  oil_amount NUMERIC(12,2) DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_by VARCHAR(100),
+  CONSTRAINT unique_car_monthly UNIQUE (car_id, month)
+);
+
+ALTER TABLE car_daily_costs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE car_monthly_costs DISABLE ROW LEVEL SECURITY;
+GRANT ALL ON car_daily_costs, car_monthly_costs TO anon, authenticated;
+
+-- 14c. سجل التموين وخطط الصيانة الوقائية
+CREATE TABLE IF NOT EXISTS fuel_logs (
+  id TEXT PRIMARY KEY,
+  car_id TEXT NOT NULL,
+  date DATE NOT NULL,
+  liters NUMERIC(12,2) NOT NULL DEFAULT 0,
+  price_per_liter NUMERIC(10,2) DEFAULT 0,
+  total_amount NUMERIC(12,2) DEFAULT 0,
+  odometer_km NUMERIC(12,1),
+  driver_id TEXT,
+  note TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_by VARCHAR(100)
+);
+
+CREATE TABLE IF NOT EXISTS service_plans (
+  id TEXT PRIMARY KEY,
+  car_id TEXT NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  interval_km NUMERIC(12,1) NOT NULL DEFAULT 0,
+  last_done_km NUMERIC(12,1),
+  last_done_date DATE,
+  note TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_by VARCHAR(100)
+);
+
+ALTER TABLE fuel_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE service_plans DISABLE ROW LEVEL SECURITY;
+GRANT ALL ON fuel_logs, service_plans TO anon, authenticated;
+
 -- 15. تعطيل حماية الصفوف (DISABLE RLS) للمزامنة المفتوحة السلسة عبر جميع الأجهزة والهواتف
 ALTER TABLE officials DISABLE ROW LEVEL SECURITY;
 ALTER TABLE drivers DISABLE ROW LEVEL SECURITY;
@@ -331,7 +396,13 @@ ALTER TABLE maintenance_invoices DISABLE ROW LEVEL SECURITY;
 
 -- 16. تدارك إضافة الأعمدة القديمة تلقائيًا (Migration Scripts)
 ALTER TABLE officials ADD COLUMN IF NOT EXISTS password VARCHAR(100) DEFAULT '123';
-ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);`;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);
+
+-- 17. سجل مراحل الصيانة + إرجاع فواتير التراخيص بسبب
+ALTER TABLE maintenance_requests ADD COLUMN IF NOT EXISTS stage_history JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS return_reason TEXT;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS returned_by VARCHAR(100);
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS returned_at TIMESTAMPTZ;`;
 
   const tableSchemas = {
     cars: `CREATE TABLE IF NOT EXISTS cars (

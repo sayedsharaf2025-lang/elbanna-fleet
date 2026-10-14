@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useDb } from '../db/store';
+import { isHashedPassword } from '../db/passwordUtil';
 import {
   Users,
   UserPlus,
@@ -32,6 +33,9 @@ const ALL_SCREENS: { id: string; label: string }[] = [
   { id: 'car_daily_costs', label: 'مصاريف وأرباح السيارات اليومية' },
   { id: 'vehicle_profitability', label: 'ربحية السيارات' },
   { id: 'maintenance', label: 'قسم الصيانة' },
+  { id: 'fuel_logs', label: 'المالية — سجل التموين' },
+  { id: 'service_plans', label: 'العمليات — الصيانة الوقائية' },
+  { id: 'driver_reports', label: 'التقارير — السائقين وتكلفة الكيلو' },
   { id: 'car_monthly_costs', label: 'المالية — المرتبات والسولار والزيت الشهرية' },
   { id: 'license_invoice_approvals', label: 'المالية — اعتماد فواتير التراخيص' },
   { id: 'maintenance_requests', label: 'الصيانة — تسجيل الطلبات (مدير الحركة)' },
@@ -100,7 +104,7 @@ export function UsersSettingsTab() {
     setEditingId(id);
     setEditName(u.display_name);
     setEditUsername(u.username);
-    setEditPassword(u.password);
+    setEditPassword(isHashedPassword(u.password) ? '' : u.password);
     setEditOfficialName(u.linked_official_id ? (db.officials.find(o => o.id === u.linked_official_id)?.name || '') : '');
   };
 
@@ -221,7 +225,7 @@ export function UsersSettingsTab() {
                       <span className="text-slate-600">/</span>
                       <input value={editUsername} onChange={(e) => setEditUsername(e.target.value)} placeholder="اسم المستخدم" className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono outline-none focus:border-emerald-500 w-28" />
                       <span className="text-slate-600 flex items-center gap-1"><Key className="w-3 h-3" /></span>
-                      <input value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder="كلمة المرور" className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono outline-none focus:border-emerald-500 w-28" />
+                      <input value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder={isHashedPassword(u.password) ? 'كلمة مرور جديدة (اختياري)' : 'كلمة المرور'} className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono outline-none focus:border-emerald-500 w-28" />
                       {u.linked_official_id && (
                         <input value={editOfficialName} onChange={(e) => setEditOfficialName(e.target.value)} placeholder="اسم مسؤول التراخيص" title="اسم مسؤول التراخيص (مستقل عن الاسم واسم المستخدم)" className="bg-slate-950 border border-amber-500/40 rounded-lg px-2.5 py-1.5 text-amber-300 text-xs font-bold outline-none focus:border-amber-400 w-36" />
                       )}
@@ -234,7 +238,7 @@ export function UsersSettingsTab() {
                       <span className="font-mono text-slate-500 text-[11px]">@{u.username}</span>
                       <span className="font-mono text-slate-600 text-[11px] flex items-center gap-1">
                         <Key className="w-3 h-3" />
-                        {visiblePasswordFor === u.id ? u.password : '••••••'}
+                        {visiblePasswordFor === u.id ? (isHashedPassword(u.password) ? 'مشفّرة' : u.password) : '••••••'}
                         <button type="button" onClick={() => setVisiblePasswordFor(v => v === u.id ? null : u.id)} className="text-slate-500 hover:text-slate-300">
                           {visiblePasswordFor === u.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                         </button>

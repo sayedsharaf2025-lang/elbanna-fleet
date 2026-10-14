@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { Download } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Download, Upload } from 'lucide-react';
 import { useDb } from '../db/store';
 
 const LAST_BACKUP_KEY = 'elbanna_last_backup_at';
@@ -13,6 +13,9 @@ const LAST_BACKUP_KEY = 'elbanna_last_backup_at';
 export function BackupButton() {
   const db = useDb();
   const [lastAt, setLastAt] = useState<string | null>(() => localStorage.getItem(LAST_BACKUP_KEY));
+  const fileRef = useRef<HTMLInputElement>(null);
+  const dbRef = useRef(db);
+  dbRef.current = db;
 
   if (db.currentUser?.role !== 'admin') return null;
 
@@ -41,6 +44,8 @@ export function BackupButton() {
         maintenanceInvoices: db.maintenanceInvoices,
         carDailyCosts: db.carDailyCosts,
         carMonthlyCosts: db.carMonthlyCosts,
+        fuelLogs: db.fuelLogs,
+        servicePlans: db.servicePlans,
         farms: db.farms,
       },
     };
@@ -58,7 +63,49 @@ export function BackupButton() {
     setLastAt(now);
   };
 
+  // استرجاع من ملف نسخة احتياطية: معاينة بالأعداد + تأكيد + تنزيل نسخة من البيانات الحالية قبل الاستبدال
+  const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    let payload: any;
+    try {
+      payload = JSON.parse(await file.text());
+    } catch {
+      window.alert('تعذّرت قراءة الملف — اتأكد إنه ملف نسخة احتياطية (JSON) سليم.');
+      return;
+    }
+    const d = payload?.data;
+    if (payload?.app !== 'elbanna-fleet' || !d) {
+      window.alert('الملف ده مش نسخة احتياطية صالحة لنظام الأسطول.');
+      return;
+    }
+    const n = (v: any) => (Array.isArray(v) ? v.length : 0);
+    const summary = `النسخة بتاريخ ${String(payload.exported_at || '').split('T')[0] || 'غير معروف'} وفيها:\n` +
+      `• ${n(d.drivers)} سائق\n• ${n(d.cars)} سيارة\n• ${n(d.invoices)} فاتورة تراخيص\n• ${n(d.transportRequests)} طلب نقل\n• ${n(d.custodyAccounts)} حساب عهدة\n\n` +
+      'تحذير: الاسترجاع بيستبدل البيانات الحالية بالكامل (المستخدمين وكلمات المرور والصيانة مش داخلين). ' +
+      'هننزّل نسخة من بياناتك الحالية الأول كاحتياطي. تكمل؟';
+    if (!window.confirm(summary)) return;
+    handleBackup();
+    const res = dbRef.current.restoreFromBackup(payload);
+    window.alert(res.message + (res.success ? '\n\nهيتم رفع البيانات للسحابة تلقائيًا خلال ثواني. سيب الصفحة مفتوحة.' : ''));
+    if (res.success) {
+      setTimeout(() => { dbRef.current.uploadLocalDataToCloud(); }, 3500);
+    }
+  };
+
   return (
+    <>
+    <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={handleRestoreFile} />
+    <button
+      type="button"
+      onClick={() => fileRef.current?.click()}
+      title="استرجاع من ملف نسخة احتياطية"
+      className="text-xs font-bold px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-800"
+    >
+      <Upload className="w-4 h-4" />
+      <span className="hidden sm:inline">استرجاع</span>
+    </button>
     <button
       type="button"
       onClick={handleBackup}
@@ -68,5 +115,6 @@ export function BackupButton() {
       <Download className="w-4 h-4" />
       <span className="hidden sm:inline">{stale ? 'نسخة احتياطية (مطلوبة)' : 'نسخة احتياطية'}</span>
     </button>
+    </>
   );
 }

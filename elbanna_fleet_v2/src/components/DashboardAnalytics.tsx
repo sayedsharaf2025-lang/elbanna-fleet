@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { useDb } from '../db/store';
+import { ExpiryAlertsCard } from './ExpiryAlertsCard';
 import {
   BarChart,
   Bar,
@@ -169,6 +170,8 @@ export const DashboardAnalytics: React.FC = () => {
         </div>
 
       </div>
+
+      <ExpiryAlertsCard />
 
       {/* Interactive Charts Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

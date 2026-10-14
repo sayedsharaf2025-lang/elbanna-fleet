@@ -5,9 +5,14 @@
 
 import React, { useState } from 'react';
 import { useDb } from '../db/store';
+import { isHashedPassword, verifyPassword } from '../db/passwordUtil';
 import { Invoice, InvoiceItem, CustodyAccount, CustodyMovement, Official } from '../types';
 import { A5PrintPreview } from './A5PrintPreview';
 import { PdfInvoiceImport } from './PdfInvoiceImport';
+import { SortableTh } from './SortableTh';
+import { useSort } from '../hooks/useSort';
+import { printA4Report } from '../utils/printA4';
+import { buildAccountLedger, buildOfficialLedger, MOVEMENT_TYPE_LABEL } from '../utils/custodyLedger';
 import {
   FileText,
   Plus,
@@ -67,7 +72,7 @@ const AdminOfficialPasswordRow: React.FC<AdminOfficialPasswordRowProps> = ({ off
       <td className="py-2.5 px-3 text-center font-mono text-[11px] font-bold">
         <div className="flex items-center justify-center gap-1.5">
           <span className="bg-slate-950 px-2 py-1 rounded text-yellow-405 border border-slate-800">
-            {showPass ? currentPass : '••••••'}
+            {showPass ? (isHashedPassword(currentPass) ? 'مشفّرة' : currentPass) : '••••••'}
           </span>
           <button
             type="button"
@@ -133,6 +138,96 @@ export const InvoicesTab: React.FC = () => {
   const [archiveSearchQuery, setArchiveSearchQuery] = useState('');
   const [showDeletedInvoices, setShowDeletedInvoices] = useState(false);
   const [selectedLedgerAccountId, setSelectedLedgerAccountId] = useState<string>('all');
+
+  // أرشيف الفواتير: التصفية (نفس منطق البحث القديم) + الفرز بالضغط على العنوان + الطباعة A4
+  const archiveFiltered = db.invoices.filter(i => {
+    const q = archiveSearchQuery.toLowerCase().trim();
+    const official = db.officials.find(o => o.id === i.official_id);
+    const targetCar = db.cars.find(c => c.id === i.car_id);
+    const isMatch = !archiveSearchQuery ? true : (
+      i.invoice_number.toLowerCase().includes(q) ||
+      (targetCar?.car_number || '').toLowerCase().includes(q) ||
+      (official?.name || '').toLowerCase().includes(q) ||
+      (i.license_location || '').toLowerCase().includes(q) ||
+      (i.license_details || '').toLowerCase().includes(q)
+    );
+
+    if (i.is_deleted) {
+      const specificallyTyped = archiveSearchQuery && (i.invoice_number.toLowerCase() === q || i.invoice_number.toLowerCase().includes(q));
+      return showDeletedInvoices || specificallyTyped || (archiveSearchQuery && isMatch);
+    }
+
+    return isMatch;
+  });
+  const archiveSort = useSort(archiveFiltered, (inv, key) => {
+    switch (key) {
+      case 'number': return inv.invoice_number;
+      case 'date': return inv.invoice_date;
+      case 'car': return db.cars.find(c => c.id === inv.car_id)?.car_number || 'سيارة عامة';
+      case 'official': return db.officials.find(o => o.id === inv.official_id)?.name || 'مشرف تراخيص';
+      default: return inv.total_amount;
+    }
+  });
+  const printUserName = db.currentUser?.name || db.currentUser?.username || '';
+
+  const handlePrintInvoicesA4 = () => {
+    const rows = archiveSort.sorted;
+    const activeRows = rows.filter(i => !i.is_deleted);
+    const total = activeRows.reduce((s, i) => s + (i.total_amount || 0), 0);
+    printA4Report({
+      title: 'كشف الفواتير ومصروفات الترخيص',
+      subtitle: archiveSearchQuery ? `نتائج البحث: ${archiveSearchQuery}` : 'كل الفواتير' + (showDeletedInvoices ? ' (شامل الملغاة)' : ''),
+      user: printUserName,
+      orientation: 'portrait',
+      headers: ['رقم الفاتورة', 'التاريخ', 'السيارة', 'المسؤول عن الصرف', 'الحالة', 'القيمة (ج.م)'],
+      rows: rows.map(i => [
+        i.invoice_number,
+        i.invoice_date,
+        db.cars.find(c => c.id === i.car_id)?.car_number || 'سيارة عامة',
+        db.officials.find(o => o.id === i.official_id)?.name || 'مشرف تراخيص',
+        i.is_deleted ? 'ملغاة' : (i.approval_status || 'approved') === 'pending' ? 'بانتظار المالية' : i.approval_status === 'returned' ? 'مرتجعة' : 'معتمدة',
+        i.total_amount,
+      ]),
+      totalsRow: ['الإجمالي (غير الملغاة)', '', '', '', `${activeRows.length} فاتورة`, total],
+    });
+  };
+
+  const handlePrintLedgerA4 = () => {
+    const isSup = db.currentUser?.role === 'supervisor' && !!db.currentUser?.officialId;
+    const mine = (m: CustodyMovement) => !isSup || m.official_id === db.currentUser?.officialId;
+    const accName = (id?: string) => db.custodyAccounts.find(a => a.id === id)?.name || '';
+    if (selectedLedgerAccountId === 'all') {
+      const rows = buildOfficialLedger(db.custodyMovements.filter(mine));
+      printA4Report({
+        title: 'كشف حركات العهد والتسويات',
+        subtitle: 'كل العهد والحسابات — الرصيد الجاري لكل مسؤول',
+        user: printUserName,
+        orientation: 'landscape',
+        headers: ['التاريخ', 'المسؤول', 'الحساب', 'البيان', 'النوع', 'الوارد (+)', 'المنصرف (-)', 'الرصيد الجاري'],
+        rows: rows.map(m => [
+          m.date,
+          db.officials.find(o => o.id === m.official_id)?.name || '',
+          [accName(m.from_account_id), accName(m.to_account_id)].filter(Boolean).join(' ➔ ') || 'عهدة المسؤول',
+          m.description,
+          MOVEMENT_TYPE_LABEL[m.type] || m.type,
+          m.inflow || '-', m.outflow || '-', m.runningBalanceAfter,
+        ]),
+        totalsRow: ['الإجمالي', '', '', '', '', rows.reduce((s, m) => s + m.inflow, 0), rows.reduce((s, m) => s + m.outflow, 0), ''],
+      });
+      return;
+    }
+    const acc = db.custodyAccounts.find(a => a.id === selectedLedgerAccountId);
+    const rows = buildAccountLedger(db.custodyMovements.filter(mine), selectedLedgerAccountId);
+    printA4Report({
+      title: `كشف حساب عهدة: ${acc?.name || ''}`,
+      subtitle: `المسؤول: ${db.officials.find(o => o.id === acc?.official_id)?.name || ''} — الرصيد الحالي: ${(acc?.balance ?? 0).toLocaleString()} ج.م`,
+      user: printUserName,
+      orientation: 'portrait',
+      headers: ['التاريخ', 'البيان', 'النوع', 'الوارد (+)', 'المنصرف (-)', 'الرصيد الجاري'],
+      rows: rows.map(m => [m.date, m.description, MOVEMENT_TYPE_LABEL[m.type] || m.type, m.inflow || '-', m.outflow || '-', m.running]),
+      totalsRow: ['الإجمالي', '', '', rows.reduce((s, m) => s + m.inflow, 0), rows.reduce((s, m) => s + m.outflow, 0), acc?.balance ?? 0],
+    });
+  };
 
   // --- STATS & DIAL STATE ---
   const [statusMsg, setStatusMsg] = useState<{ type: 'error' | 'success' | null; text: string }>({ type: null, text: '' });
@@ -726,7 +821,7 @@ export const InvoicesTab: React.FC = () => {
   };
 
   // الفاتورة المعتمدة من المالية مقفولة: التعديل/الحذف لأدمن البرنامج بس
-  const canModifyInvoice = (inv: Invoice) => (inv.approval_status || 'approved') === 'pending' || db.currentUser?.role === 'admin';
+  const canModifyInvoice = (inv: Invoice) => (inv.approval_status || 'approved') !== 'approved' || db.currentUser?.role === 'admin';
 
   const handlePurgeInvoiceClick = (inv: Invoice) => {
     const sup = db.officials.find(o => o.id === inv.official_id);
@@ -1363,40 +1458,31 @@ export const InvoicesTab: React.FC = () => {
                   />
                   <span>عرض الفواتير الملغاة</span>
                 </label>
+                <button
+                  type="button"
+                  onClick={handlePrintInvoicesA4}
+                  disabled={archiveSort.sorted.length === 0}
+                  className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white font-bold text-[11px] px-3 py-2.5 rounded-lg flex items-center gap-1.5 whitespace-nowrap"
+                  title="طباعة الكشف على A4 بالترتيب الحالي (برأس وتذييل فيهم التاريخ واسم المستخدم)"
+                >
+                  <Printer className="w-3.5 h-3.5" /> طباعة كشف A4
+                </button>
               </div>
 
-              <div className="overflow-x-auto text-[11px]">
-                <table className="w-full text-right my-2">
+              <div className="xl-wrap text-[11px]" style={{ maxHeight: '65vh' }}>
+                <table className="xl-table xl-plain w-full text-right">
                   <thead>
                     <tr className="bg-slate-950 text-slate-400 font-medium">
-                      <th className="py-2 px-2.5">رقم الفاتورة</th>
-                      <th className="py-2 px-2.5">السيارة</th>
-                      <th className="py-2 px-2.5 font-sans text-center">المسؤول عن الصرف</th>
-                      <th className="py-2 px-2.5 text-left">قيمة الفاتورة ج.م</th>
-                      <th className="py-2 px-2.5 text-left">تسوية وعمليات</th>
+                      <SortableTh label="رقم الفاتورة" sortKey="number" sort={archiveSort.sort} onToggle={archiveSort.toggle} sticky />
+                      <SortableTh label="السيارة" sortKey="car" sort={archiveSort.sort} onToggle={archiveSort.toggle} />
+                      <SortableTh label="المسؤول عن الصرف" sortKey="official" sort={archiveSort.sort} onToggle={archiveSort.toggle} />
+                      <SortableTh label="قيمة الفاتورة ج.م" sortKey="amount" sort={archiveSort.sort} onToggle={archiveSort.toggle} />
+                      <th className="xl-th">تسوية وعمليات</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(() => {
-                      const filtered = db.invoices.filter(i => {
-                        const q = archiveSearchQuery.toLowerCase().trim();
-                        const official = db.officials.find(o => o.id === i.official_id);
-                        const targetCar = db.cars.find(c => c.id === i.car_id);
-                        const isMatch = !archiveSearchQuery ? true : (
-                          i.invoice_number.toLowerCase().includes(q) ||
-                          (targetCar?.car_number || '').toLowerCase().includes(q) ||
-                          (official?.name || '').toLowerCase().includes(q) ||
-                          (i.license_location || '').toLowerCase().includes(q) ||
-                          (i.license_details || '').toLowerCase().includes(q)
-                        );
-
-                        if (i.is_deleted) {
-                          const specificallyTyped = archiveSearchQuery && (i.invoice_number.toLowerCase() === q || i.invoice_number.toLowerCase().includes(q));
-                          return showDeletedInvoices || specificallyTyped || (archiveSearchQuery && isMatch);
-                        }
-
-                        return isMatch;
-                      });
+                      const filtered = archiveSort.sorted;
 
                       if (filtered.length === 0) {
                         return (
@@ -1413,13 +1499,19 @@ export const InvoicesTab: React.FC = () => {
                         const targetCar = db.cars.find(c => c.id === inv.car_id);
                         return (
                           <tr key={inv.id} className={`border-b border-white/5 hover:bg-white/[0.02] ${inv.is_deleted ? 'opacity-50 bg-rose-950/5' : ''}`}>
-                            <td className="py-3 px-2 font-mono font-bold text-slate-100 flex flex-wrap items-center gap-1.5 pt-4">
+                            <td className="xl-sticky-col py-3 px-2 font-mono font-bold text-slate-100">
+                              <div className="flex flex-wrap items-center gap-1.5">
                               <span className={inv.is_deleted ? 'line-through text-rose-450/80' : ''}>
                                 {inv.invoice_number}
                               </span>
                               {inv.is_modified && (
                                 <span className="text-[8px] bg-amber-950 text-amber-400 border border-amber-500/20 px-1 rounded inline-block" title={`نسخة معدلة رقم ${inv.version}`}>
                                   معدلة ({inv.version})
+                                </span>
+                              )}
+                              {!inv.is_deleted && inv.approval_status === 'returned' && (
+                                <span className="text-[8px] bg-rose-950 text-rose-300 border border-rose-500/30 px-1 rounded inline-block max-w-[180px] whitespace-normal leading-snug" title={inv.return_reason || ''}>
+                                  مرتجعة من المالية: {inv.return_reason || 'بدون سبب'}
                                 </span>
                               )}
                               {!inv.is_deleted && (inv.approval_status || 'approved') === 'pending' && (
@@ -1437,6 +1529,7 @@ export const InvoicesTab: React.FC = () => {
                                   ملغاة ومحذوفة (مسترد)
                                 </span>
                               )}
+                              </div>
                             </td>
                             <td className={`py-3 px-2 font-black ${inv.is_deleted ? 'text-slate-500 line-through' : 'text-emerald-400'}`}>{targetCar ? targetCar.car_number : "سيارة عامة"}</td>
                             <td className={`py-3 px-2 text-center font-semibold ${inv.is_deleted ? 'text-slate-500' : 'text-slate-300'}`}>{official?.name || "مشرف تراخيص"}</td>
@@ -1450,6 +1543,20 @@ export const InvoicesTab: React.FC = () => {
                               >
                                 <Printer className="w-3.5 h-3.5" />
                               </button>
+                              {!inv.is_deleted && inv.approval_status === 'returned' && (db.currentUser?.role !== 'supervisor' || inv.official_id === db.currentUser.officialId) && (
+                                <button
+                                  onClick={() => {
+                                    const res = db.resubmitInvoice(inv.id);
+                                    if (res.success) showStatus('تم إعادة إرسال الفاتورة لموافقة المالية.', 'success');
+                                    else showStatus(res.error || 'تعذّرت إعادة الإرسال.', 'error');
+                                  }}
+                                  className="bg-amber-500 hover:bg-amber-400 text-white font-bold text-[10px] px-2 py-1 rounded"
+                                  title="إعادة إرسال الفاتورة للمالية بدون تعديل"
+                                  type="button"
+                                >
+                                  إعادة إرسال
+                                </button>
+                              )}
                               {!inv.is_deleted && canModifyInvoice(inv) && (db.currentUser?.role !== 'supervisor' || inv.official_id === db.currentUser.officialId) && (
                                 <button
                                   onClick={() => handleOpenEditPreFinalized(inv)}
@@ -1879,6 +1986,14 @@ export const InvoicesTab: React.FC = () => {
                       );
                     })}
                   </select>
+                  <button
+                    type="button"
+                    onClick={handlePrintLedgerA4}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] px-2.5 py-1.5 rounded flex items-center gap-1 whitespace-nowrap"
+                    title="طباعة الكشف على A4"
+                  >
+                    <Printer className="w-3 h-3" /> A4
+                  </button>
                 </div>
               </div>
 
@@ -1897,47 +2012,7 @@ export const InvoicesTab: React.FC = () => {
                     </thead>
                     <tbody>
                       {(() => {
-                        const chronological = [...db.custodyMovements].reverse();
-                        const officialRunningBalances: Record<string, number> = {};
-                        
-                        const processedMovements = chronological.map(m => {
-                          let inflow = 0;
-                          let outflow = 0;
-                          
-                          if (m.to_account_id) {
-                            inflow = m.amount;
-                          } else if (m.type === 'deposit') {
-                            inflow = m.amount;
-                          }
-                          
-                          if (m.from_account_id) {
-                            outflow = m.amount;
-                          } else if (m.type === 'withdrawal' || m.type === 'invoice_charge') {
-                            outflow = m.amount;
-                          }
-                          
-                          if (!m.from_account_id && !m.to_account_id) {
-                            if (m.type === 'deposit') {
-                              inflow = m.amount;
-                            } else if (m.type === 'withdrawal' || m.type === 'invoice_charge') {
-                              outflow = m.amount;
-                            }
-                          }
-                          
-                          const offId = m.official_id;
-                          const curBalance = officialRunningBalances[offId] || 0;
-                          const nextBalance = curBalance + (inflow - outflow);
-                          officialRunningBalances[offId] = nextBalance;
-                          
-                          return {
-                            ...m,
-                            inflow,
-                            outflow,
-                            runningBalanceAfter: nextBalance
-                          };
-                        });
-                        
-                        const newestFirst = [...processedMovements].reverse();
+                        const newestFirst = buildOfficialLedger(db.custodyMovements);
                         
                         if (newestFirst.length === 0) {
                           return (
@@ -2006,51 +2081,7 @@ export const InvoicesTab: React.FC = () => {
                     <tbody>
                       {(() => {
                         const accId = selectedLedgerAccountId;
-                        const subMovs = db.custodyMovements.filter(m => m.from_account_id === accId || m.to_account_id === accId);
-                        
-                        const chronological = [...subMovs].reverse();
-                        let running = 0;
-                        const processed = chronological.map((m) => {
-                          let inflow = 0;
-                          let outflow = 0;
-
-                          if (m.to_account_id === accId) {
-                            inflow = m.amount;
-                          } else if (m.type === 'deposit' && !m.from_account_id) {
-                            inflow = m.amount;
-                          }
-
-                          if (m.from_account_id === accId) {
-                            outflow = m.amount;
-                          } else if ((m.type === 'withdrawal' || m.type === 'invoice_charge') && !m.to_account_id) {
-                            outflow = m.amount;
-                          }
-
-                          if (!m.from_account_id && !m.to_account_id) {
-                            if (m.type === 'deposit') {
-                              inflow = m.amount;
-                            } else if (m.type === 'withdrawal' || m.type === 'invoice_charge') {
-                              outflow = m.amount;
-                            } else if (m.type === 'settlement') {
-                              if (m.description.includes('-') || m.description.includes('عجز') || m.description.includes('تنزيل')) {
-                                outflow = m.amount;
-                              } else {
-                                inflow = m.amount;
-                              }
-                            }
-                          }
-
-                          running += (inflow - outflow);
-
-                          return {
-                            ...m,
-                            inflow,
-                            outflow,
-                            running
-                          };
-                        });
-
-                        const newestFirst = [...processed].reverse();
+                        const newestFirst = buildAccountLedger(db.custodyMovements, accId);
 
                         if (newestFirst.length === 0) {
                           return (
@@ -2242,7 +2273,7 @@ export const InvoicesTab: React.FC = () => {
             }
 
             const currentActualPassword = official.password || '123';
-            if (personalOldPassword !== currentActualPassword) {
+            if (!verifyPassword(personalOldPassword, currentActualPassword)) {
               setPersonalPasswordError('كلمة المرور الحالية غير صحيحة!');
               return;
             }
