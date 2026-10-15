@@ -163,9 +163,13 @@ export interface DbContextType {
 
   // نظام المستخدمين الموحّد — شاشة واحدة، كل مستخدم بشاشاته الخاصة من غير ارتباط بقسم/رتبة
   systemUsers: SystemUser[];
-  addSystemUser: (username: string, password: string, displayName: string, allowedScreens: string[]) => { success: boolean; error?: string; user?: SystemUser };
-  updateSystemUser: (id: string, updates: { username?: string; password?: string; display_name?: string; official_name?: string; allowed_screens?: string[] }) => { success: boolean; error?: string; gainedCustodyAccount?: boolean };
-  deleteSystemUser: (id: string) => void;
+  addSystemUser: (username: string, password: string, displayName: string, allowedScreens: string[]) => Promise<{ success: boolean; error?: string; user?: SystemUser; cloudSaved: boolean }>;
+  updateSystemUser: (id: string, updates: { username?: string; password?: string; display_name?: string; official_name?: string; allowed_screens?: string[] }) => Promise<{ success: boolean; error?: string; cloudSaved: boolean }>;
+  deleteSystemUser: (id: string) => Promise<{ success: boolean; cloudSaved: boolean }>;
+  // إنشاء حساب عهدة (مشرف صرف) يدويًا لمستخدم موجود — مش تلقائي
+  createOfficialForUser: (userId: string, initial?: { cash_custody?: number; visa_custody?: number }) => Promise<{ success: boolean; error?: string; official?: Official; cloudSaved: boolean }>;
+  // آخر خطأ في حفظ المستخدمين بالسحابة (null لو تمام)
+  systemUsersSyncError: string | null;
 
   // إعدادات تكلفة خطوط السير — المرحلة 1 من تطوير نظام طلبات النقل
   defaultGarageLocation: string;
