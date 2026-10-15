@@ -26,7 +26,7 @@ const ALL_SCREENS: { id: string; label: string }[] = [
   { id: 'violations', label: 'تسجيل المخالفات وتفادي التكرار' },
   { id: 'requests_tracking', label: 'متابعة الطلبات' },
   { id: 'license_tracking', label: 'متابعة وتحديث التراخيص المتقدمة' },
-  { id: 'custody_licensing', label: 'فواتير تراخيص' },
+  { id: 'custody_licensing', label: 'فواتير تراخيص (بيُنشئ حساب عهدة تلقائيًا)' },
   { id: 'deductions', label: 'الخصومات الفردية والجماعية' },
   { id: 'cross_accounts', label: 'أرشيف وحسابات السائقين (شهرية)' },
   { id: 'route_accounting', label: 'حساب خطوط السير' },
@@ -71,25 +71,21 @@ export function UsersSettingsTab() {
     setNewName(''); setNewUsername(''); setNewPassword(''); setNewScreens([]); setShowAddForm(false);
   };
 
-  const cloudWarn = ' ⚠️ اتحفظ على الجهاز ده بس ولسه ماوصلش للسحابة — تأكد من الإنترنت وجرّب تاني قبل ما يدخل من جهاز تاني.';
-
-  const handleAddUser = async (e: React.FormEvent) => {
+  const handleAddUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newUsername.trim() || !newPassword) {
       showNotification('error', 'يرجى إدخال الاسم واسم المستخدم وكلمة المرور');
       return;
     }
-    const res = await db.addSystemUser(newUsername, newPassword, newName, newScreens);
+    const res = db.addSystemUser(newUsername, newPassword, newName, newScreens);
     if (!res.success) {
       showNotification('error', res.error || 'تعذّر إضافة المستخدم');
       return;
     }
-    if (!res.cloudSaved) {
-      showNotification('error', `تم إضافة "${newName}".${cloudWarn}`);
-    } else if (newScreens.includes(LICENSING_SCREEN_ID)) {
-      showNotification('success', `تم إضافة "${newName}" بنجاح وحفظه في السحابة. لإنشاء عهدة له كمشرف صرف: افتح "فواتير تراخيص ← كشف الحساب والتحويلات ← إدارة مسؤولي الصرف" واضغط "إنشاء عهدة".`);
+    if (newScreens.includes(LICENSING_SCREEN_ID)) {
+      showNotification('success', `تم إضافة "${newName}" بنجاح، وتم إنشاء حساب عهدة له تلقائيًا لأنه عنده صلاحية "فواتير تراخيص".`);
     } else {
-      showNotification('success', `تم إضافة "${newName}" بنجاح وحفظه في السحابة.`);
+      showNotification('success', `تم إضافة "${newName}" بنجاح.`);
     }
     resetAddForm();
   };
@@ -112,33 +108,33 @@ export function UsersSettingsTab() {
     setEditOfficialName(u.linked_official_id ? (db.officials.find(o => o.id === u.linked_official_id)?.name || '') : '');
   };
 
-  const saveEditIdentity = async (id: string) => {
-    const res = await db.updateSystemUser(id, { username: editUsername, password: editPassword, display_name: editName, official_name: editOfficialName });
+  const saveEditIdentity = (id: string) => {
+    const res = db.updateSystemUser(id, { username: editUsername, password: editPassword, display_name: editName, official_name: editOfficialName });
     if (!res.success) {
       showNotification('error', res.error || 'تعذّر الحفظ');
       return;
     }
-    if (!res.cloudSaved) showNotification('error', `تم الحفظ.${cloudWarn}`);
-    else showNotification('success', 'تم حفظ بيانات المستخدم بنجاح.');
+    showNotification('success', 'تم حفظ بيانات المستخدم بنجاح.');
     setEditingId(null);
   };
 
-  const toggleScreen = async (userId: string, screenId: string, currentScreens: string[]) => {
+  const toggleScreen = (userId: string, screenId: string, currentScreens: string[]) => {
     const already = currentScreens.includes(screenId);
     const next = already ? currentScreens.filter(s => s !== screenId) : [...currentScreens, screenId];
-    const res = await db.updateSystemUser(userId, { allowed_screens: next });
+    const res = db.updateSystemUser(userId, { allowed_screens: next });
     if (!res.success) {
       showNotification('error', res.error || 'تعذّر تحديث الشاشات');
       return;
     }
-    if (!res.cloudSaved) showNotification('error', `تم تحديث الشاشات.${cloudWarn}`);
+    if (res.gainedCustodyAccount) {
+      showNotification('success', 'تم منح صلاحية "فواتير تراخيص" وإنشاء حساب عهدة جديد لهذا المستخدم تلقائيًا.');
+    }
   };
 
-  const handleDeleteUser = async (id: string, name: string) => {
-    if (!window.confirm(`هل أنت متأكد من حذف المستخدم "${name}"؟ لو عنده حساب عهدة مالية، هيفضل محفوظ زي ما هو ومش هيتحذف (تقدر تحذفه من شاشة إدارة مسؤولي الصرف).`)) return;
-    const res = await db.deleteSystemUser(id);
-    if (!res.cloudSaved) showNotification('error', `تم حذف "${name}" محليًا.${cloudWarn}`);
-    else showNotification('success', `تم حذف المستخدم "${name}".`);
+  const handleDeleteUser = (id: string, name: string) => {
+    if (!window.confirm(`هل أنت متأكد من حذف المستخدم "${name}"؟ لو عنده حساب عهدة مالية، هيفضل محفوظ زي ما هو ومش هيتحذف.`)) return;
+    db.deleteSystemUser(id);
+    showNotification('success', `تم حذف المستخدم "${name}".`);
   };
 
   return (
@@ -149,7 +145,7 @@ export function UsersSettingsTab() {
           <span className="text-xs font-bold text-emerald-400 tracking-wider block uppercase mb-1">لوحة الأمن والتحكم</span>
           <h2 className="text-xl md:text-2xl font-black text-slate-100 font-sans tracking-tight">المستخدمين</h2>
           <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-            أضف أي عدد من المستخدمين وحدد شاشات كل واحد بحرية تامة — مفيش أقسام أو رتب ثابتة. حساب العهدة المالية (مشرف صرف) بيتنشأ يدويًا من شاشة "إدارة مسؤولي الصرف" داخل فواتير تراخيص، مش تلقائي.
+            أضف أي عدد من المستخدمين وحدد شاشات كل واحد بحرية تامة — مفيش أقسام أو رتب ثابتة. أي مستخدم تدّيله صلاحية "فواتير تراخيص" بيتعمله حساب عهدة مالية تلقائيًا.
           </p>
         </div>
         <button

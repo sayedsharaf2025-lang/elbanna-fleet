@@ -453,7 +453,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       // ترقية تلقائية: لو الباسورد لسه مخزن كنص عادي نشفّره أول ما صاحبه يدخل بنجاح
       if (!isHashedPassword(matched.password)) {
         const hashedPw = hashPassword(password);
-        commitSystemUsers<void>(base => ({ next: base.map(u => u.id === matched.id ? { ...u, password: hashedPw } : u) }));
+        persistSystemUsers(latestSystemUsers.map(u => u.id === matched.id ? { ...u, password: hashedPw } : u));
         if (matched.linked_official_id) setOfficialPasswordHash(matched.linked_official_id, hashedPw);
       }
       // بداية نشاط جديد (لتسجيل الخروج التلقائي بعد الخمول)
@@ -658,78 +658,24 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     return buildMigratedSystemUsers();
   });
 
-  // نسخة حيّة من المستخدمين (بتتحدث مع كل رسم) + طابور لتسلسل عمليات الحفظ عشان مايحصلش تداخل بينها
-  const systemUsersRef = useRef<SystemUser[]>(systemUsers);
-  systemUsersRef.current = systemUsers;
-  const systemUsersQueueRef = useRef<Promise<unknown>>(Promise.resolve());
-  const [systemUsersSyncError, setSystemUsersSyncError] = useState<string | null>(null);
-
-  type SystemUsersMutation<T> = { error: string } | { next: SystemUser[]; value?: T };
-
-  // حفظ المستخدمين بشكل مضمون:
-  //  1) بنجيب آخر نسخة من السحابة الأول (مش النسخة اللي في الجهاز) ونطبق التعديل عليها —
-  //     كده أي جهاز بنسخة قديمة مايقدرش يمسح مستخدم اتضاف من جهاز تاني.
-  //  2) الحفظ في السحابة مابقاش مشروط بحالة "isCloudConnected" (كان بيتخطى الحفظ بصمت لو الاتصال لسه ماجهزش
-  //     وقت إنشاء المستخدم، فيفضل المستخدم موجود على جهاز الإنشاء بس).
-  //  3) لو الحفظ فشل بنعيد المحاولة مرة، ولو فشل تاني بنرجّع cloudSaved=false عشان الشاشة تنبّه الأدمن.
-  const commitSystemUsers = <T,>(
-    mutator: (base: SystemUser[]) => SystemUsersMutation<T>
-  ): Promise<{ success: boolean; error?: string; value?: T; cloudSaved: boolean }> => {
-    const run = async () => {
-      const client = getSupabaseClient();
-      let base = systemUsersRef.current;
-      if (client) {
-        try {
-          const { data, error } = await client.from('system_settings').select('value').eq('key', 'system_users').maybeSingle();
-          if (!error && data?.value) {
-            const parsed = JSON.parse(data.value);
-            if (Array.isArray(parsed) && parsed.length > 0) base = mergeNewScreensIntoAdminUser(parsed);
-          }
-        } catch (e) {
-          console.warn("commitSystemUsers: fetch latest users failed, using local copy:", e);
-        }
-      }
-
-      const out = mutator(base);
-      if ('error' in out) return { success: false, error: out.error, cloudSaved: false };
-
-      const next = out.next;
-      systemUsersRef.current = next;
-      setSystemUsers(next);
-      localStorage.setItem('elbanna_system_users', JSON.stringify(next));
-
-      if (!client) return { success: true, value: out.value, cloudSaved: false };
-
-      let lastErr = '';
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const { error } = await client.from('system_settings').upsert({ key: 'system_users', value: JSON.stringify(next) });
-          if (!error) {
-            setSystemUsersSyncError(null);
-            return { success: true, value: out.value, cloudSaved: true };
-          }
-          lastErr = error.message;
-        } catch (e: any) {
-          lastErr = e?.message || String(e);
-        }
-        await new Promise(r => setTimeout(r, 800));
-      }
-      console.warn("Supabase save system_users error:", lastErr);
-      setSystemUsersSyncError(lastErr || 'تعذّر الحفظ في السحابة');
-      return { success: true, value: out.value, cloudSaved: false };
-    };
-    const p = systemUsersQueueRef.current.then(run, run) as Promise<{ success: boolean; error?: string; value?: T; cloudSaved: boolean }>;
-    systemUsersQueueRef.current = p.catch(() => undefined);
-    return p;
+  const persistSystemUsers = (next: SystemUser[]) => {
+    setSystemUsers(next);
+    localStorage.setItem('elbanna_system_users', JSON.stringify(next));
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      supabase.from('system_settings').upsert({ key: 'system_users', value: JSON.stringify(next) })
+        .then(({ error }) => { if (error) console.warn("Supabase save system_users error:", error); });
+    }
   };
 
-  const addSystemUser = async (username: string, password: string, displayName: string, allowedScreens: string[]) => {
+  const addSystemUser = (username: string, password: string, displayName: string, allowedScreens: string[]) => {
     const trimmedUser = username.trim();
     const trimmedName = displayName.trim() || trimmedUser;
-    if (!trimmedUser || !password) return { success: false, error: 'يرجى إدخال اسم مستخدم وكلمة مرور', cloudSaved: false };
+    if (!trimmedUser || !password) return { success: false, error: 'يرجى إدخال اسم مستخدم وكلمة مرور' };
+    if (systemUsers.some(u => u.username.trim().toLowerCase() === trimmedUser.toLowerCase())) {
+      return { success: false, error: 'اسم المستخدم ده مستخدم بالفعل' };
+    }
     const hashedPw = hashPassword(password);
-    // ملاحظة: إنشاء المستخدم لا ينشئ حساب عهدة تلقائيًا — العهدة بتتنشأ يدويًا من
-    // شاشة "🔐 إدارة كلمات مرور مسؤولي الصرف" (زر "إنشاء عهدة") بواسطة الأدمن.
     const newUser: SystemUser = {
       id: generateId('sysuser'),
       username: trimmedUser,
@@ -738,45 +684,45 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       role_tag: 'custom',
       allowed_screens: allowedScreens,
     };
-    const res = await commitSystemUsers<SystemUser>(base => {
-      if (base.some(u => u.username.trim().toLowerCase() === trimmedUser.toLowerCase())) {
-        return { error: 'اسم المستخدم ده مستخدم بالفعل' };
-      }
-      return { next: [...base, newUser], value: newUser };
-    });
-    return { success: res.success, error: res.error, user: res.value, cloudSaved: res.cloudSaved };
+    let finalUser = newUser;
+    if (allowedScreens.includes('custody_licensing')) {
+      const newOfficial = addOfficial({ name: trimmedName, cash_custody: 0, visa_custody: 0, password: hashedPw });
+      finalUser = { ...newUser, linked_official_id: newOfficial.id };
+    }
+    persistSystemUsers([...systemUsers, finalUser]);
+    return { success: true, user: finalUser };
   };
 
-  // تحديث بيانات مستخدم (اسم/يوزر/باسورد/شاشات) — من غير أي إنشاء تلقائي لحساب عهدة
-  const updateSystemUser = async (id: string, updates: { username?: string; password?: string; display_name?: string; official_name?: string; allowed_screens?: string[] }) => {
+  // تحديث بيانات مستخدم (اسم/يوزر/باسورد/شاشات) — ولو ضاف صلاحية "فواتير تراخيص" لأول مرة
+  // بيتعمله تلقائيًا حساب عهدة (Official) مربوط بيه عشان يقدر يستخدم الشاشة دي فعليًا
+  const updateSystemUser = (id: string, updates: { username?: string; password?: string; display_name?: string; official_name?: string; allowed_screens?: string[] }) => {
+    const target = systemUsers.find(u => u.id === id);
+    if (!target) return { success: false, error: 'المستخدم غير موجود' };
     const newHashed = updates.password ? hashPassword(updates.password) : undefined;
-    const res = await commitSystemUsers<SystemUser>(base => {
-      // لو المستخدم موجود على الجهاز ده بس (اتعمل قبل الإصلاح ومااترفعش للسحابة) نكمل من نسخة الجهاز
-      // ونرفعه للسحابة مع التعديل — كده "حفظ" واحد من جهاز الإنشاء بيصلّح دخوله من باقي الأجهزة
-      const target = base.find(u => u.id === id) || systemUsersRef.current.find(u => u.id === id);
-      if (!target) return { error: 'المستخدم غير موجود' };
-      if (updates.username) {
-        const trimmed = updates.username.trim();
-        if (base.some(u => u.id !== id && u.username.trim().toLowerCase() === trimmed.toLowerCase())) {
-          return { error: 'اسم المستخدم ده مستخدم بالفعل' };
-        }
+    if (updates.username) {
+      const trimmed = updates.username.trim();
+      if (systemUsers.some(u => u.id !== id && u.username.trim().toLowerCase() === trimmed.toLowerCase())) {
+        return { success: false, error: 'اسم المستخدم ده مستخدم بالفعل' };
       }
-      const updatedUser: SystemUser = {
-        ...target,
-        username: updates.username?.trim() || target.username,
-        password: newHashed || target.password,
-        display_name: updates.display_name?.trim() || target.display_name,
-        allowed_screens: updates.allowed_screens || target.allowed_screens,
-      };
-      const existsInBase = base.some(u => u.id === id);
-      return { next: existsInBase ? base.map(u => u.id === id ? updatedUser : u) : [...base, updatedUser], value: updatedUser };
-    });
-    if (!res.success || !res.value) return { success: false, error: res.error, cloudSaved: false };
-    const updatedUser = res.value;
-    const linkedOfficialId = updatedUser.linked_official_id;
+    }
 
-    // اسم مسؤول التراخيص (حساب العهدة) مستقل عن الاسم الظاهر واسم المستخدم.
-    // الباسورد بس هو اللي بيفضل متزامن لأنه بيستخدم في الدخول.
+    let linkedOfficialId = target.linked_official_id;
+    const gainedLicensingAccess = updates.allowed_screens
+      && updates.allowed_screens.includes('custody_licensing')
+      && !target.allowed_screens.includes('custody_licensing');
+
+    if (gainedLicensingAccess && !linkedOfficialId) {
+      const newOfficial = addOfficial({
+        name: updates.display_name?.trim() || target.display_name,
+        cash_custody: 0,
+        visa_custody: 0,
+        password: newHashed || target.password,
+      });
+      linkedOfficialId = newOfficial.id;
+    }
+
+    // اسم مسؤول التراخيص (حساب العهدة) مستقل تمامًا عن الاسم الظاهر واسم المستخدم:
+    // بيتغيّر بس لو اتبعت official_name صراحةً. الباسورد بس هو اللي بيفضل متزامن لأنه بيستخدم في الدخول.
     if (linkedOfficialId) {
       if (updates.official_name && updates.official_name.trim()) {
         updateOfficialName(linkedOfficialId, updates.official_name.trim());
@@ -786,6 +732,16 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       }
     }
 
+    const updatedUser: SystemUser = {
+      ...target,
+      username: updates.username?.trim() || target.username,
+      password: newHashed || target.password,
+      display_name: updates.display_name?.trim() || target.display_name,
+      allowed_screens: updates.allowed_screens || target.allowed_screens,
+      linked_official_id: linkedOfficialId,
+    };
+    persistSystemUsers(systemUsers.map(u => u.id === id ? updatedUser : u));
+
     // لو المستخدم ده هو نفسه الداخل دلوقتي، نحدّث جلسته النشطة فورًا من غير ما يحتاج يعمل تسجيل خروج
     if (currentUser?.systemUserId === id) {
       const updatedSession = { ...currentUser, name: updatedUser.display_name, username: updatedUser.username, allowedScreens: updatedUser.allowed_screens, officialId: linkedOfficialId };
@@ -793,39 +749,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       localStorage.setItem('elbanna_current_user', JSON.stringify(updatedSession));
     }
 
-    return { success: true, cloudSaved: res.cloudSaved };
+    return { success: true, gainedCustodyAccount: gainedLicensingAccess && !target.linked_official_id };
   };
 
   // حذف مستخدم من الجدول الموحد فقط — حساب العهدة المالية المربوط (لو موجود) بيفضل زي ما هو
   // ومايتمسحش تلقائي، حفاظًا على البيانات المالية؛ يتحذف بشكل منفصل ومقصود لو لزم الأمر
-  const deleteSystemUser = async (id: string) => {
-    const res = await commitSystemUsers<void>(base => ({ next: base.filter(u => u.id !== id) }));
-    return { success: res.success, cloudSaved: res.cloudSaved };
-  };
-
-  // إنشاء حساب عهدة (مشرف صرف) يدويًا لمستخدم موجود — بيتم من شاشة إدارة مسؤولي الصرف، مش تلقائي
-  const createOfficialForUser = async (userId: string, initial?: { cash_custody?: number; visa_custody?: number }) => {
-    const user = systemUsersRef.current.find(u => u.id === userId);
-    if (!user) return { success: false, error: 'المستخدم غير موجود', cloudSaved: false };
-    if (user.linked_official_id && officials.some(o => o.id === user.linked_official_id)) {
-      return { success: false, error: 'المستخدم ده عنده حساب عهدة بالفعل', cloudSaved: false };
-    }
-    const official = addOfficial({
-      name: user.display_name,
-      cash_custody: initial?.cash_custody || 0,
-      visa_custody: initial?.visa_custody || 0,
-      password: user.password,
-    });
-    const res = await commitSystemUsers<void>(base => {
-      if (!base.some(u => u.id === userId)) return { error: 'المستخدم غير موجود' };
-      return { next: base.map(u => u.id === userId ? { ...u, linked_official_id: official.id } : u) };
-    });
-    if (currentUser?.systemUserId === userId) {
-      const updatedSession = { ...currentUser, officialId: official.id };
-      setCurrentUser(updatedSession);
-      localStorage.setItem('elbanna_current_user', JSON.stringify(updatedSession));
-    }
-    return { success: res.success, error: res.error, official, cloudSaved: res.cloudSaved };
+  const deleteSystemUser = (id: string) => {
+    persistSystemUsers(systemUsers.filter(u => u.id !== id));
   };
 
   const addFarmIfNew = (farmName: string) => {
@@ -1921,11 +1851,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       try {
         const { data, error } = await supabase.from('system_settings').select('*');
         if (!error && data) {
-          // لو السحابة مفيهاش قايمة مستخدمين خالص (مثلاً اتحفظت محلي بس زمان)، نرفع النسخة اللي في الجهاز
-          // مرة واحدة عشان باقي الأجهزة تقدر تدخل بنفس المستخدمين
-          if (!data.some(r => r.key === 'system_users' && r.value) && systemUsersRef.current.length > 0) {
-            commitSystemUsers<void>(base => ({ next: base }));
-          }
           data.forEach(row => {
             if (row.key === 'admin_password' && row.value) {
               _setAdminPassword(row.value);
@@ -3114,11 +3039,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     setOfficials(prev => prev.filter(o => o.id !== id));
     setCustodyAccounts(prev => prev.filter(ca => ca.official_id !== id));
 
-    // أي مستخدم كان مربوط بالمشرف المحذوف بنفك ارتباطه (المستخدم نفسه بيفضل موجود)
-    if (systemUsersRef.current.some(u => u.linked_official_id === id)) {
-      commitSystemUsers<void>(base => ({ next: base.map(u => u.linked_official_id === id ? { ...u, linked_official_id: undefined } : u) }));
-    }
-
     if (officialCustomScreens[id]) {
       updateOfficialScreens(id, null);
     }
@@ -3244,7 +3164,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     setOfficialPasswordHash(id, stored);
     const linked = systemUsers.find(u => u.linked_official_id === id);
     if (linked) {
-      commitSystemUsers<void>(base => ({ next: base.map(u => u.id === linked.id ? { ...u, password: stored } : u) }));
+      persistSystemUsers(systemUsers.map(u => u.id === linked.id ? { ...u, password: stored } : u));
     }
   };
 
@@ -5000,8 +4920,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         addSystemUser,
         updateSystemUser,
         deleteSystemUser,
-        createOfficialForUser,
-        systemUsersSyncError,
         defaultGarageLocation,
         updateDefaultGarageLocation,
         costItemTypes,
