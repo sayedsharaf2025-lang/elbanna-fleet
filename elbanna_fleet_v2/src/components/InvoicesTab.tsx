@@ -36,7 +36,10 @@ import {
   ArrowUp,
   ArrowDown,
   Lock,
-  Key
+  Key,
+  Archive,
+  FilePlus2,
+  ArrowRight
 } from 'lucide-react';
 
 interface DraftVoucher {
@@ -59,16 +62,23 @@ interface DraftVoucher {
 interface AdminOfficialPasswordRowProps {
   official: Official;
   currentPass: string;
+  linkedUserName?: string;
   onUpdate: (newPass: string) => void;
+  onDelete: () => void;
 }
 
-const AdminOfficialPasswordRow: React.FC<AdminOfficialPasswordRowProps> = ({ official, currentPass, onUpdate }) => {
+const AdminOfficialPasswordRow: React.FC<AdminOfficialPasswordRowProps> = ({ official, currentPass, linkedUserName, onUpdate, onDelete }) => {
   const [newPasswordVal, setNewPasswordVal] = useState('');
   const [showPass, setShowPass] = useState(false);
 
   return (
     <tr className="border-b border-slate-800/60 hover:bg-slate-900/40 text-slate-300">
       <td className="py-2.5 px-3 font-semibold text-right text-slate-100">{official.name}</td>
+      <td className="py-2.5 px-3 text-center text-[11px] font-bold">
+        {linkedUserName
+          ? <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">@{linkedUserName}</span>
+          : <span className="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full" title="المشرف ده موجود في العهد بس ومالوش مستخدم دخول في شاشة المستخدمين">بدون مستخدم</span>}
+      </td>
       <td className="py-2.5 px-3 text-center font-mono text-[11px] font-bold">
         <div className="flex items-center justify-center gap-1.5">
           <span className="bg-slate-950 px-2 py-1 rounded text-yellow-405 border border-slate-800">
@@ -111,6 +121,48 @@ const AdminOfficialPasswordRow: React.FC<AdminOfficialPasswordRowProps> = ({ off
           </button>
         </form>
       </td>
+      <td className="py-2.5 px-3 text-center">
+        <button
+          type="button"
+          onClick={onDelete}
+          className="bg-rose-900/20 text-rose-400 hover:bg-rose-900/40 p-1.5 rounded transition-all inline-flex items-center gap-1 text-[10px] font-bold"
+          title="حذف مشرف الصرف"
+        >
+          <Trash2 className="w-3.5 h-3.5" /> حذف
+        </button>
+      </td>
+    </tr>
+  );
+};
+
+interface UserWithoutCustodyRowProps {
+  displayName: string;
+  username: string;
+  onCreate: (cash: number, visa: number) => void;
+}
+
+// مستخدم من شاشة المستخدمين ليس له حساب عهدة — الأدمن ينشئ له العهدة يدويًا من هنا (مش تلقائي)
+const UserWithoutCustodyRow: React.FC<UserWithoutCustodyRowProps> = ({ displayName, username, onCreate }) => {
+  const [cash, setCash] = useState(0);
+  const [visa, setVisa] = useState(0);
+  return (
+    <tr className="border-b border-slate-800/60 hover:bg-slate-900/40 text-slate-300">
+      <td className="py-2.5 px-3 font-semibold text-right text-slate-100">{displayName} <span className="font-mono text-slate-500 text-[10px]">@{username}</span></td>
+      <td className="py-2.5 px-3 text-center">
+        <input type="number" min={0} value={cash || ''} placeholder="0" onChange={(e) => setCash(Number(e.target.value) || 0)} className="p-1 rounded bg-slate-950 border border-slate-800 text-[11px] font-mono w-24 text-center" />
+      </td>
+      <td className="py-2.5 px-3 text-center">
+        <input type="number" min={0} value={visa || ''} placeholder="0" onChange={(e) => setVisa(Number(e.target.value) || 0)} className="p-1 rounded bg-slate-950 border border-slate-800 text-[11px] font-mono w-24 text-center" />
+      </td>
+      <td className="py-2.5 px-3 text-center">
+        <button
+          type="button"
+          onClick={() => onCreate(cash, visa)}
+          className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold px-3 py-1.5 rounded text-[10px] transition-all"
+        >
+          إنشاء عهدة كمشرف صرف
+        </button>
+      </td>
     </tr>
   );
 };
@@ -135,16 +187,25 @@ export const InvoicesTab: React.FC = () => {
     }
   }, [db.currentUser]);
 
+  // شاشة عهد الصرف المفتوحة: الرئيسية (اختيار العملية) / مسودة مصروفات ترخيص / أرشيف الفواتير — الاتنين الأخيرين بحجم الشاشة كاملة
+  const [invoiceView, setInvoiceView] = useState<'home' | 'draft' | 'archive'>('home');
   const [archiveSearchQuery, setArchiveSearchQuery] = useState('');
+  const [archiveDateFrom, setArchiveDateFrom] = useState('');
+  const [archiveDateTo, setArchiveDateTo] = useState('');
   const [showDeletedInvoices, setShowDeletedInvoices] = useState(false);
   const [selectedLedgerAccountId, setSelectedLedgerAccountId] = useState<string>('all');
 
   // أرشيف الفواتير: التصفية (نفس منطق البحث القديم) + الفرز بالضغط على العنوان + الطباعة A4
-  const archiveFiltered = db.invoices.filter(i => {
+  // الأرشيف مايعرضش أي فواتير غير لما يتكتب بحث (رقم السيارة / رقم الفاتورة / المسؤول) أو يتحدد تاريخ
+  const hasArchiveCriteria = archiveSearchQuery.trim() !== '' || archiveDateFrom !== '' || archiveDateTo !== '';
+  const archiveFiltered = !hasArchiveCriteria ? [] : db.invoices.filter(i => {
+    const invDate = String(i.invoice_date || '').slice(0, 10);
+    if (archiveDateFrom && invDate < archiveDateFrom) return false;
+    if (archiveDateTo && invDate > archiveDateTo) return false;
     const q = archiveSearchQuery.toLowerCase().trim();
     const official = db.officials.find(o => o.id === i.official_id);
     const targetCar = db.cars.find(c => c.id === i.car_id);
-    const isMatch = !archiveSearchQuery ? true : (
+    const isMatch = !q ? true : (
       i.invoice_number.toLowerCase().includes(q) ||
       (targetCar?.car_number || '').toLowerCase().includes(q) ||
       (official?.name || '').toLowerCase().includes(q) ||
@@ -153,8 +214,8 @@ export const InvoicesTab: React.FC = () => {
     );
 
     if (i.is_deleted) {
-      const specificallyTyped = archiveSearchQuery && (i.invoice_number.toLowerCase() === q || i.invoice_number.toLowerCase().includes(q));
-      return showDeletedInvoices || specificallyTyped || (archiveSearchQuery && isMatch);
+      const specificallyTyped = q && (i.invoice_number.toLowerCase() === q || i.invoice_number.toLowerCase().includes(q));
+      return showDeletedInvoices || specificallyTyped || (q && isMatch);
     }
 
     return isMatch;
@@ -176,7 +237,11 @@ export const InvoicesTab: React.FC = () => {
     const total = activeRows.reduce((s, i) => s + (i.total_amount || 0), 0);
     printA4Report({
       title: 'كشف الفواتير ومصروفات الترخيص',
-      subtitle: archiveSearchQuery ? `نتائج البحث: ${archiveSearchQuery}` : 'كل الفواتير' + (showDeletedInvoices ? ' (شامل الملغاة)' : ''),
+      subtitle: [
+        archiveSearchQuery ? `نتائج البحث: ${archiveSearchQuery}` : '',
+        archiveDateFrom ? `من تاريخ: ${archiveDateFrom}` : '',
+        archiveDateTo ? `إلى تاريخ: ${archiveDateTo}` : '',
+      ].filter(Boolean).join(' — ') + (showDeletedInvoices ? ' (شامل الملغاة)' : ''),
       user: printUserName,
       orientation: 'portrait',
       headers: ['رقم الفاتورة', 'التاريخ', 'السيارة', 'المسؤول عن الصرف', 'الحالة', 'القيمة (ج.م)'],
@@ -469,6 +534,9 @@ export const InvoicesTab: React.FC = () => {
 
     if (res.success) {
       showStatus(`تم حفظ وطباعة الفاتورة وإرسالها لموافقة المالية. الخصم من العهدة بيتم بعد الموافقة بس.`, "success");
+
+      // بعد الترحيل والحفظ: تقفل شاشة المسودة وترجع لشاشة عهد الصرف المفتوحة
+      setInvoiceView('home');
       
       // Auto reprint
       if (res.invoice) {
@@ -541,6 +609,31 @@ export const InvoicesTab: React.FC = () => {
     setNewOfficialInitialVisa(0);
   };
 
+  // حذف مشرف صرف (أدمن فقط) مع تنبيه لو عليه أرصدة أو فواتير
+  const handleDeleteOfficial = (o: Official) => {
+    const accs = db.custodyAccounts.filter(a => a.official_id === o.id);
+    const totalBal = accs.reduce((sum, a) => sum + (a.balance || 0), 0);
+    const invCount = db.invoices.filter(i => i.official_id === o.id).length;
+    const linkedUser = db.systemUsers.find(u => u.linked_official_id === o.id);
+    let msg = `هل تريد حذف مشرف الصرف "${o.name}" وحسابات عهدته (${accs.length} حساب)؟`;
+    if (totalBal !== 0) msg += `\n\n⚠️ رصيد العهدة الحالي: ${totalBal.toLocaleString()} ج.م — هيتحذف مع الحساب.`;
+    if (invCount > 0) msg += `\n⚠️ له ${invCount} فاتورة مسجلة — الفواتير هتفضل في الأرشيف لكن هتظهر بدون اسم المشرف.`;
+    if (linkedUser) msg += `\n\nالمستخدم المرتبط به (@${linkedUser.username}) هيفضل موجود لكن هيتفك ارتباطه بالعهدة.`;
+    if (!window.confirm(msg)) return;
+    if ((totalBal !== 0 || invCount > 0) && !window.confirm(`تأكيد أخير: حذف "${o.name}" نهائي ولا يمكن التراجع عنه. متابعة؟`)) return;
+    db.deleteOfficial(o.id);
+    showStatus(`تم حذف مشرف الصرف "${o.name}".`, 'success');
+  };
+
+  const handleCreateOfficialForUser = async (userId: string, displayName: string, cash: number, visa: number) => {
+    const res = await db.createOfficialForUser(userId, { cash_custody: cash, visa_custody: visa });
+    if (!res.success) {
+      showStatus(res.error || 'تعذّر إنشاء العهدة', 'error');
+      return;
+    }
+    showStatus(`تم إنشاء عهدة "${displayName}" كمشرف صرف.${res.cloudSaved ? '' : ' ⚠️ اتحفظت على الجهاز ده بس — تأكد من الإنترنت.'}`, res.cloudSaved ? 'success' : 'error');
+  };
+
   const handleCreateSubAccount = (officialId: string) => {
     if (!newSubAccName.trim() || newSubAccBalance < 0) {
       alert("الرجاء استيفاء بيانات الحساب الفرعي لتجزئة العهدة!");
@@ -597,6 +690,9 @@ export const InvoicesTab: React.FC = () => {
   const [editInvoiceItems, setEditInvoiceItems] = useState<{ id: string; description: string; paymentMethod: 'cash' | 'visa'; accountId: string; amount: number }[]>([]);
 
   const handleOpenEditPreFinalized = (inv: Invoice) => {
+    // لوحة التعديل المحاسبي بتظهر في شاشة عهد الصرف المفتوحة، فنقفل الأرشيف ونرجع لها
+    setInvoiceView('home');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     setEditingInvoiceId(inv.id);
     setEditInvoiceTargetCarId(inv.car_id || '');
     setEditInvoiceDetails(inv.license_details || '');
@@ -840,6 +936,17 @@ export const InvoicesTab: React.FC = () => {
   };
 
 
+  const statusBanner = statusMsg.text ? (
+    <div className={`p-4 rounded-xl border flex items-center gap-3 text-xs md:text-sm ${statusMsg.type === 'success' ? 'bg-emerald-900/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-900/10 border-rose-500/20 text-rose-400'}`}>
+      {statusMsg.type === 'success' ? (
+        <ShieldCheck className="w-5 h-5 flex-shrink-0 text-emerald-400" />
+      ) : (
+        <AlertOctagon className="w-5 h-5 flex-shrink-0 text-rose-400" />
+      )}
+      <span className="font-extrabold">{statusMsg.text}</span>
+    </div>
+  ) : null;
+
   return (
     <div className="space-y-6" id="unified_custody_system" style={{ direction: 'rtl' }}>
       
@@ -862,7 +969,7 @@ export const InvoicesTab: React.FC = () => {
       )}
 
       {/* Corporate Notification Banners */}
-      {statusMsg.text && (
+      {statusMsg.text && !(activeSubTab === 'invoices' && invoiceView !== 'home') && (
         <div className={`p-4 rounded-xl border flex items-center gap-3 text-xs md:text-sm animate-pulse ${statusMsg.type === 'success' ? 'bg-emerald-900/10 border-emerald-520/20 text-emerald-400' : 'bg-rose-900/10 border-rose-520/20 text-rose-400'}`}>
           {statusMsg.type === 'success' ? (
             <ShieldCheck className="w-5 h-5 flex-shrink-0 text-emerald-400" />
@@ -1151,7 +1258,70 @@ export const InvoicesTab: React.FC = () => {
             </div>
           )}
 
-          {/* DYNAMIC CARDS CONTAINER: MULTIPLE OPEN SESSIONS FOR VEHICLE EXPENSES */}
+          {/* شاشة عهد الصرف المفتوحة: اختيار العملية (مصروف ترخيص / أرشيف الفواتير) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 no-print">
+            <button
+              type="button"
+              onClick={() => setInvoiceView('draft')}
+              className="group text-right bg-slate-900 hover:bg-emerald-500/5 border border-emerald-500/30 hover:border-emerald-500 rounded-2xl p-6 transition-all shadow-lg flex items-start gap-4"
+              id="open_license_expense_btn"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                <FilePlus2 className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-black text-slate-100 text-base md:text-lg flex items-center gap-2">
+                  فتح مصروف ترخيص
+                  {draftVouchers.some(v => v.carId) && (
+                    <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold">
+                      {draftVouchers.filter(v => v.carId).length} مسودة محفوظة
+                    </span>
+                  )}
+                </h3>
+                <p className="text-[11px] md:text-xs text-slate-400 leading-relaxed">
+                  يفتح شاشة "مسودة مصروفات ترخيص" بالحجم الكامل لتجهيز بنود الصرف للسيارة، وبعد "ترحيل وحفظ" تقفل الشاشة وترجع هنا.
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setInvoiceView('archive')}
+              className="group text-right bg-slate-900 hover:bg-indigo-500/5 border border-indigo-500/30 hover:border-indigo-500 rounded-2xl p-6 transition-all shadow-lg flex items-start gap-4"
+              id="open_invoices_archive_btn"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                <Archive className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-black text-slate-100 text-base md:text-lg">أرشيف الفواتير</h3>
+                <p className="text-[11px] md:text-xs text-slate-400 leading-relaxed">
+                  يفتح أرشيف الفواتير بالحجم الكامل — ابحث برقم السيارة أو بالتاريخ لعرض الفواتير وتسويتها وطباعتها.
+                </p>
+              </div>
+            </button>
+          </div>
+
+          {/* شاشة مسودة مصروفات ترخيص — بالحجم الكامل */}
+          {invoiceView === 'draft' && (
+            <div className="fixed inset-0 z-[45] bg-slate-950 overflow-y-auto no-print" style={{ direction: 'rtl' }} id="license_draft_fullscreen">
+              <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 md:px-8 py-3 flex items-center justify-between gap-3">
+                <h2 className="font-black text-slate-100 text-base md:text-xl flex items-center gap-2.5">
+                  <FilePlus2 className="w-6 h-6 text-emerald-400" />
+                  مسودة مصروفات ترخيص
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setInvoiceView('home')}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5"
+                  title="المسودة بتتحفظ تلقائيًا"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  رجوع لشاشة عهد الصرف المفتوحة
+                </button>
+              </div>
+              <div className="p-4 md:p-8 space-y-4 max-w-[1900px] mx-auto">
+                {statusBanner}
           <div className="space-y-4">
             <div className="flex justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800">
               <div>
@@ -1319,7 +1489,7 @@ export const InvoicesTab: React.FC = () => {
                         </button>
                       </div>
 
-                      <div className="space-y-2 max-h-[180px] overflow-y-auto scrollbar-thin">
+                      <div className="space-y-2 max-h-[45vh] overflow-y-auto scrollbar-thin">
                         {v.items.map((row_item, rIdx) => (
                           <div key={row_item.id} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-950/40 p-2 rounded-xl border border-slate-800 items-center">
                             <div className="sm:col-span-2 flex items-center justify-between bg-slate-900/60 px-2 py-1 rounded border border-slate-800/40">
@@ -1420,13 +1590,33 @@ export const InvoicesTab: React.FC = () => {
             </div>
           </div>
 
-          {/* LOWER GRID: COMPLETED INVOICES LEDGER ARCHIVE */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4">
-            
+              </div>
+            </div>
+          )}
+
+          {/* شاشة أرشيف الفواتير — بالحجم الكامل */}
+          {invoiceView === 'archive' && (
+            <div className="fixed inset-0 z-[45] bg-slate-950 overflow-y-auto no-print" style={{ direction: 'rtl' }} id="invoices_archive_fullscreen">
+              <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 md:px-8 py-3 flex items-center justify-between gap-3">
+                <h2 className="font-black text-slate-100 text-base md:text-xl flex items-center gap-2.5">
+                  <Archive className="w-6 h-6 text-indigo-400" />
+                  أرشيف الفواتير
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setInvoiceView('home')}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  رجوع لشاشة عهد الصرف المفتوحة
+                </button>
+              </div>
+              <div className="p-4 md:p-8 space-y-4 max-w-[1900px] mx-auto">
+                {statusBanner}
             <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 space-y-4">
               <div className="border-b border-slate-800 pb-2.5">
                 <h3 className="font-bold text-slate-100 text-sm">أرشيف الفواتير ومصروفات ترخيص السيارات المعتمدة</h3>
-                <p className="text-[11px] text-slate-400">سجل المدفوعات الموثق - يدعم التعديل اللاحق (التسوية)، التعطيل المالي والطباعة الفورية على قياس A5 المعتمد.</p>
+                <p className="text-[11px] text-slate-400">سجل المدفوعات الموثق - يدعم التعديل اللاحق (التسوية)، التعطيل المالي والطباعة الفورية على قياس A5 المعتمد. لا تظهر الفواتير إلا بعد كتابة رقم السيارة في البحث أو تحديد تاريخ.</p>
               </div>
 
               {/* Universal Search Box & Toggle */}
@@ -1434,7 +1624,7 @@ export const InvoicesTab: React.FC = () => {
                 <div className="relative flex-1">
                   <input
                     type="text"
-                    placeholder="ابحث برقم الفاتورة (مثال: INV-2026-0005)، رقم السيارة، أو اسم المسؤول..."
+                    placeholder="اكتب رقم السيارة للبحث (أو رقم الفاتورة / اسم المسؤول)..."
                     className="w-full text-xs p-2.5 pl-8 pr-3 rounded-lg border border-slate-800 bg-slate-950 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                     value={archiveSearchQuery}
                     onChange={(e) => setArchiveSearchQuery(e.target.value)}
@@ -1447,6 +1637,25 @@ export const InvoicesTab: React.FC = () => {
                     >
                       ✕
                     </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-bold whitespace-nowrap">
+                  <span>من تاريخ</span>
+                  <input
+                    type="date"
+                    className="text-xs p-2 rounded-lg border border-slate-800 bg-slate-950 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
+                    value={archiveDateFrom}
+                    onChange={(e) => setArchiveDateFrom(e.target.value)}
+                  />
+                  <span>إلى</span>
+                  <input
+                    type="date"
+                    className="text-xs p-2 rounded-lg border border-slate-800 bg-slate-950 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
+                    value={archiveDateTo}
+                    onChange={(e) => setArchiveDateTo(e.target.value)}
+                  />
+                  {(archiveDateFrom || archiveDateTo) && (
+                    <button type="button" onClick={() => { setArchiveDateFrom(''); setArchiveDateTo(''); }} className="text-slate-400 hover:text-slate-200 px-1" title="مسح التاريخ">✕</button>
                   )}
                 </div>
                 <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 select-none font-semibold hover:text-slate-100 text-[11px] whitespace-nowrap bg-slate-950/40 px-2.5 py-2.5 rounded-lg border border-slate-800">
@@ -1469,11 +1678,12 @@ export const InvoicesTab: React.FC = () => {
                 </button>
               </div>
 
-              <div className="xl-wrap text-[11px]" style={{ maxHeight: '65vh' }}>
+              <div className="xl-wrap text-[11px]" style={{ maxHeight: 'calc(100vh - 300px)' }}>
                 <table className="xl-table xl-plain w-full text-right">
                   <thead>
                     <tr className="bg-slate-950 text-slate-400 font-medium">
                       <SortableTh label="رقم الفاتورة" sortKey="number" sort={archiveSort.sort} onToggle={archiveSort.toggle} sticky />
+                      <SortableTh label="التاريخ" sortKey="date" sort={archiveSort.sort} onToggle={archiveSort.toggle} />
                       <SortableTh label="السيارة" sortKey="car" sort={archiveSort.sort} onToggle={archiveSort.toggle} />
                       <SortableTh label="المسؤول عن الصرف" sortKey="official" sort={archiveSort.sort} onToggle={archiveSort.toggle} />
                       <SortableTh label="قيمة الفاتورة ج.م" sortKey="amount" sort={archiveSort.sort} onToggle={archiveSort.toggle} />
@@ -1487,8 +1697,10 @@ export const InvoicesTab: React.FC = () => {
                       if (filtered.length === 0) {
                         return (
                           <tr>
-                            <td colSpan={5} className="py-8 text-center text-slate-500">
-                              لا توجد نتائج تطابق القيمة المبحوث عنها.
+                            <td colSpan={6} className="py-16 text-center text-slate-500">
+                              {hasArchiveCriteria
+                                ? 'لا توجد نتائج تطابق القيمة المبحوث عنها.'
+                                : '🔎 اكتب رقم السيارة في خانة البحث أو اختر تاريخًا لعرض الفواتير.'}
                             </td>
                           </tr>
                         );
@@ -1531,6 +1743,7 @@ export const InvoicesTab: React.FC = () => {
                               )}
                               </div>
                             </td>
+                            <td className="py-3 px-2 font-mono text-slate-300 whitespace-nowrap">{String(inv.invoice_date || '').slice(0, 10)}</td>
                             <td className={`py-3 px-2 font-black ${inv.is_deleted ? 'text-slate-500 line-through' : 'text-emerald-400'}`}>{targetCar ? targetCar.car_number : "سيارة عامة"}</td>
                             <td className={`py-3 px-2 text-center font-semibold ${inv.is_deleted ? 'text-slate-500' : 'text-slate-300'}`}>{official?.name || "مشرف تراخيص"}</td>
                             <td className={`py-3 px-2 text-left font-mono font-black ${inv.is_deleted ? 'text-rose-400 line-through' : 'text-yellow-400'}`}>{inv.total_amount.toLocaleString()} ج.م</td>
@@ -1614,8 +1827,12 @@ export const InvoicesTab: React.FC = () => {
                 </table>
               </div>
             </div>
+              </div>
+            </div>
+          )}
 
-            {/* AUDIT LOG INVOICE_AUDIT_LOGS SCHEMATIC TABLE */}
+          {/* سجل المحاسبة وتدقيق الحركات */}
+          <div className="pt-2">
             <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 space-y-4">
               <div className="border-b border-slate-800 pb-2.5 flex items-center gap-1.5">
                 <ScrollText className="w-4 h-4 text-emerald-450" />
@@ -1727,7 +1944,7 @@ export const InvoicesTab: React.FC = () => {
                 </h3>
 
                 <p className="text-[11px] text-slate-400">
-                  تستطيع من هنا معرفة كلمة المرور الحالية لجميع المشرفين والمسؤولين، أو تحديث وتعيين كلمات مرور جديدة لتمكينهم من تسجيل الدخول.
+                  تستطيع من هنا معرفة كلمة المرور الحالية لجميع المشرفين والمسؤولين، أو تحديث وتعيين كلمات مرور جديدة لتمكينهم من تسجيل الدخول، أو حذف أي مشرف صرف، أو إنشاء عهدة (يدويًا) لمستخدم موجود.
                 </p>
 
                 <div className="overflow-x-auto">
@@ -1735,8 +1952,10 @@ export const InvoicesTab: React.FC = () => {
                     <thead>
                       <tr className="border-b border-slate-800 text-slate-400">
                         <th className="py-2.5 px-3 font-bold text-right">اسم مسؤول الصرف</th>
+                        <th className="py-2.5 px-3 font-bold text-center">مستخدم الدخول</th>
                         <th className="py-2.5 px-3 font-bold text-center">كلمة السر الحالية</th>
                         <th className="py-2.5 px-3 font-bold text-center">تعيين كلمة سر جديدة</th>
+                        <th className="py-2.5 px-3 font-bold text-center">حذف</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-850">
@@ -1747,16 +1966,60 @@ export const InvoicesTab: React.FC = () => {
                             key={o.id} 
                             official={o} 
                             currentPass={currentPass} 
+                            linkedUserName={db.systemUsers.find(u => u.linked_official_id === o.id)?.username}
                             onUpdate={(newP) => {
                               db.updateOfficialPassword(o.id, newP);
                               showStatus(`تم بنجاح تحديث كلمة المرور للمسؤول (${o.name}) ماليًا.`, "success");
                             }}
+                            onDelete={() => handleDeleteOfficial(o)}
                           />
                         );
                       })}
+                      {db.officials.length === 0 && (
+                        <tr><td colSpan={5} className="py-6 text-center text-slate-500">لا يوجد مشرفو صرف.</td></tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
+
+                {/* إنشاء العهدة يدويًا للمستخدمين اللي ملهمش حساب عهدة (مش تلقائي عند إنشاء المستخدم) */}
+                {(() => {
+                  const usersNoCustody = db.systemUsers.filter(u => !u.linked_official_id || !db.officials.some(o => o.id === u.linked_official_id));
+                  if (usersNoCustody.length === 0) return null;
+                  return (
+                    <div className="space-y-2 pt-3 border-t border-slate-800">
+                      <h4 className="font-black text-slate-200 text-xs flex items-center gap-1.5">
+                        <UserPlus className="w-4 h-4 text-emerald-400" />
+                        إنشاء عهدة لمستخدم كمشرف صرف
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        المستخدمين دول مالهمش حساب عهدة. اختر المستخدم واكتب الرصيد الابتدائي (اختياري) واضغط إنشاء — العهدة بتتنشأ بس لما تضغط، مش تلقائي.
+                      </p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs font-sans text-right">
+                          <thead>
+                            <tr className="border-b border-slate-800 text-slate-400">
+                              <th className="py-2 px-3 font-bold text-right">المستخدم</th>
+                              <th className="py-2 px-3 font-bold text-center">عهدة كاش ج.م</th>
+                              <th className="py-2 px-3 font-bold text-center">عهدة فيزا ج.م</th>
+                              <th className="py-2 px-3 font-bold text-center">إجراء</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {usersNoCustody.map(u => (
+                              <UserWithoutCustodyRow
+                                key={u.id}
+                                displayName={u.display_name}
+                                username={u.username}
+                                onCreate={(cash, visa) => handleCreateOfficialForUser(u.id, u.display_name, cash, visa)}
+                              />
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
