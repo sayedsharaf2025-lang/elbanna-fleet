@@ -6,6 +6,7 @@
 import React, { useMemo, useState } from 'react';
 import { useDb } from '../db/store';
 import { MaintenanceRequest, MaintenanceRequestStatus } from '../types';
+import { A5PrintPreview } from './A5PrintPreview';
 import {
   Wrench,
   Search,
@@ -22,6 +23,7 @@ import {
   ArrowLeft,
   Package,
   Building2,
+  Printer,
 } from 'lucide-react';
 
 const num = (v: string) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
@@ -549,6 +551,12 @@ function MaintenanceInvoicePanel({ invoiceId, onToast, readOnly = false }: { inv
   const [laborQty, setLaborQty] = useState('1');
   const [laborPrice, setLaborPrice] = useState('');
   const [discountDraft, setDiscountDraft] = useState(invoice ? String(invoice.discount) : '0');
+  // رقم العداد يدوي — بيتحفظ على الجهاز لكل فاتورة عشان مايتكتبش تاني عند إعادة الطباعة
+  const odoKey = `elbanna_maint_odometer_${invoiceId}`;
+  const [odometer, setOdometer] = useState<string>(() => {
+    try { return localStorage.getItem(odoKey) || ''; } catch { return ''; }
+  });
+  const [showPrint, setShowPrint] = useState(false);
   // قاعدة إلزامية: الخصم المحاسبي واعتماد/صرف الفاتورة من اختصاص مدير الصيانة فقط — صلاحية
   // فرعية منفصلة عن مجرد الوصول لشاشة الصيانة نفسها
   const canApproveDiscount = !readOnly && db.hasScreenPermission('maintenance_discount');
@@ -580,6 +588,23 @@ function MaintenanceInvoicePanel({ invoiceId, onToast, readOnly = false }: { inv
 
   const subtotal = invoice.items.reduce((s, i) => s + (i.total || 0), 0);
   const net = subtotal - (invoice.discount || 0);
+
+  // حفظ ثم طباعة A5: بنثبّت الخصم المكتوب (لو المستخدم مصرّح له) ورقم العداد، وبعدها نفتح معاينة الطباعة
+  const handleSaveAndPrint = () => {
+    if (canApproveDiscount && num(discountDraft) !== (invoice.discount || 0)) {
+      db.updateMaintenanceInvoice(invoice.id, { discount: num(discountDraft) });
+    }
+    try { localStorage.setItem(odoKey, odometer.trim()); } catch { /* التخزين المحلي غير متاح */ }
+    setShowPrint(true);
+  };
+
+  const printRequest = db.maintenanceRequests.find(r => r.id === invoice.maintenance_request_id);
+  const printCarNumber = db.cars.find(c => c.id === (printRequest?.car_id || invoice.car_id))?.car_number || '';
+  const printWorkshop = printRequest
+    ? (printRequest.workshop_type === 'external' ? (printRequest.workshop_name || 'ورشة خارجية') : 'ورشة الشركة (صيانة داخلية)')
+    : '';
+  // لو اتغير الخصم في الخانة ومش مصرّح لصاحبها يحفظه، الطباعة بتستخدم الخصم المحفوظ فعلًا
+  const printInvoice = canApproveDiscount ? { ...invoice, discount: num(discountDraft) } : invoice;
 
   const handleAdvanceInvoiceStatus = () => {
     if (!canApproveDiscount) return;
@@ -649,6 +674,30 @@ function MaintenanceInvoicePanel({ invoiceId, onToast, readOnly = false }: { inv
         <div className="text-xs text-slate-500">الإجمالي: <span className="font-mono font-bold text-slate-700">{subtotal.toLocaleString()}</span></div>
         <div className="text-sm font-black text-slate-800">صافي الفاتورة: <span className="font-mono text-emerald-600">{net.toLocaleString()} ج.م</span></div>
       </div>
+
+      <div className="flex flex-wrap items-center gap-3 bg-emerald-50/60 border border-emerald-100 rounded-xl p-3">
+        <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+          رقم العداد (كم)
+          <input type="number" min="0" value={odometer} onChange={(e) => setOdometer(e.target.value)} placeholder="يدوي" className="w-28 p-1.5 rounded border border-slate-200 font-mono text-center" />
+        </label>
+        <button type="button" onClick={handleSaveAndPrint} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-lg flex items-center gap-1.5">
+          <Printer className="w-4 h-4" /> حفظ وطباعة A5
+        </button>
+      </div>
+      {showPrint && (
+        <A5PrintPreview
+          type="maintenance_invoice"
+          maintenanceInvoiceData={{
+            invoice: printInvoice,
+            request: printRequest,
+            carNumber: printCarNumber,
+            odometer: odometer.trim(),
+            workshopName: printWorkshop,
+            faultDescription: printRequest?.fault_description || '',
+          }}
+          onClose={() => setShowPrint(false)}
+        />
+      )}
 
       {!readOnly && invoice.status !== 'paid' && (
         canApproveDiscount ? (

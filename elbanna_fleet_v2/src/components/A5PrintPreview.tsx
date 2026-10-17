@@ -6,17 +6,25 @@
 import React, { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Printer, X, ShieldAlert, CheckCircle2, History } from 'lucide-react';
-import { Invoice, InvoiceItem, Driver, Official, DriverAccountMovement } from '../types';
+import { Invoice, InvoiceItem, Driver, Official, DriverAccountMovement, MaintenanceInvoice, MaintenanceRequest } from '../types';
 
 interface A5PrintPreviewProps {
   id?: string;
-  type: 'invoice' | 'deduction' | 'statement' | 'custody_statement' | 'batch_deductions';
+  type: 'invoice' | 'maintenance_invoice' | 'deduction' | 'statement' | 'custody_statement' | 'batch_deductions';
   invoiceData?: {
     invoice: Invoice;
     items: InvoiceItem[];
     officialName: string;
     carsMap: Record<string, string>; // ID to plate number
     carsObjMap?: Record<string, any>; // ID to Car details
+  };
+  maintenanceInvoiceData?: {
+    invoice: MaintenanceInvoice;
+    request?: MaintenanceRequest;
+    carNumber: string;      // تلقائي من طلب الصيانة
+    odometer: string;       // رقم العداد — يدوي
+    workshopName: string;   // من طلب الصيانة
+    faultDescription: string; // من طلب الصيانة
   };
   deductionData?: {
     driver: Driver;
@@ -52,6 +60,7 @@ interface A5PrintPreviewProps {
 export const A5PrintPreview: React.FC<A5PrintPreviewProps> = ({
   type,
   invoiceData,
+  maintenanceInvoiceData,
   deductionData,
   statementData,
   custodyData,
@@ -175,6 +184,7 @@ export const A5PrintPreview: React.FC<A5PrintPreviewProps> = ({
             {type !== 'invoice' && (
               <div className="text-center my-2 bg-slate-50 py-1 rounded border border-slate-200">
                 <h2 className="font-bold text-slate-900 text-[11px]">
+                  {type === 'maintenance_invoice' && 'فاتورة صيانة'}
                   {type === 'deduction' && 'كشف مالي - إشعار خصم سائق مستقطع'}
                   {type === 'statement' && `كشف حساب حركة الخصومات والمستحقات بالسائق`}
                   {type === 'custody_statement' && `كشف حساب فرعي وحركات عهدة`}
@@ -281,6 +291,100 @@ export const A5PrintPreview: React.FC<A5PrintPreviewProps> = ({
                 </div>
               </div>
             )}
+
+            {/* 1b. MAINTENANCE INVOICE RENDERING (A5) — نفس تنسيق فواتير التراخيص */}
+            {type === 'maintenance_invoice' && maintenanceInvoiceData && (() => {
+              const mi = maintenanceInvoiceData;
+              const items = mi.invoice.items || [];
+              const subtotal = items.reduce((sum, i) => sum + (i.total || 0), 0);
+              const discount = mi.invoice.discount || 0;
+              const net = subtotal - discount;
+              return (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 bg-slate-50 p-2 rounded text-[10px] border border-slate-200">
+                    <div>
+                      <span className="text-slate-600 font-medium">رقم السيارة:</span>{' '}
+                      <span className="font-mono font-black text-indigo-700 text-xs">{mi.carNumber || 'سيارة غير محددة'}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-600 font-medium">رقم العداد (كم):</span>{' '}
+                      <span className="font-mono font-black text-slate-950">{mi.odometer || '................'}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-600 font-medium">اسم الورشة:</span>{' '}
+                      <span className="font-bold text-slate-950">{mi.workshopName || 'غير محدد'}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-600 font-medium">العطل:</span>{' '}
+                      <span className="font-bold text-slate-950">{mi.faultDescription || 'غير محدد'}</span>
+                    </div>
+                    <div className="col-span-2 pt-0.5 flex justify-between text-slate-800 text-[9.5px] border-t border-dashed border-slate-200">
+                      <span><span className="text-slate-600">رقم الفاتورة:</span> <span className="font-mono font-bold text-slate-950">{mi.invoice.invoice_number}</span></span>
+                      {mi.request?.request_number && (
+                        <span><span className="text-slate-600">رقم طلب الصيانة:</span> <span className="font-mono font-bold text-slate-950">{mi.request.request_number}</span></span>
+                      )}
+                      <span><span className="text-slate-600">تاريخ الفاتورة:</span> <span className="font-mono font-bold text-slate-950">{mi.invoice.invoice_date}</span></span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2">
+                    <table className="w-full text-right border-collapse text-[10px] border border-slate-200">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-900 border-b border-slate-300 font-bold">
+                          <th className="py-1 px-1.5 border border-slate-200 text-center w-6">م</th>
+                          <th className="py-1 px-1.5 border border-slate-200">البيان</th>
+                          <th className="py-1 px-1.5 border border-slate-200 text-left w-24">المبلغ (ج.م)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {items.map((item, idx) => (
+                          <tr key={item.id || idx} className="border-b border-slate-250">
+                            <td className="py-1 px-1.5 border border-slate-200 font-mono text-center text-slate-900">{idx + 1}</td>
+                            <td className="py-1 px-1.5 border border-slate-200 font-medium text-slate-900">
+                              {item.description}
+                              {item.quantity > 1 && <span className="text-slate-500 font-mono"> (×{item.quantity})</span>}
+                            </td>
+                            <td className="py-1 px-1.5 border border-slate-200 text-left font-mono font-bold text-slate-950">{(item.total || 0).toLocaleString()} ج.م</td>
+                          </tr>
+                        ))}
+                        {items.length === 0 && (
+                          <tr><td colSpan={3} className="py-3 text-center text-slate-500 border border-slate-200">لا توجد بنود</td></tr>
+                        )}
+                      </tbody>
+                      <tfoot>
+                        <tr className="font-black bg-slate-50 text-slate-950 text-[10.5px]">
+                          <td colSpan={2} className="py-1 px-1.5 border border-slate-200 text-right">الإجمالي قبل الخصم</td>
+                          <td className="py-1 px-1.5 border border-slate-200 text-left font-mono font-bold">{subtotal.toLocaleString()} ج.م</td>
+                        </tr>
+                        <tr className="font-black text-slate-950 text-[10.5px]">
+                          <td colSpan={2} className="py-1 px-1.5 border border-slate-200 text-right">خصم الفاتورة</td>
+                          <td className="py-1 px-1.5 border border-slate-200 text-left font-mono font-bold text-rose-700">{discount ? '-' : ''}{discount.toLocaleString()} ج.م</td>
+                        </tr>
+                        <tr className="font-black bg-slate-50 text-slate-950 text-[10.5px]">
+                          <td colSpan={2} className="py-1 px-1.5 border border-slate-200 text-right">الإجمالي بعد الخصم</td>
+                          <td className="py-1 px-1.5 border border-slate-200 text-left font-mono text-emerald-700 font-bold">{net.toLocaleString()} ج.م</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  <div className="mt-8 grid grid-cols-3 gap-4 border-t border-slate-200 pt-5 text-[10px] text-slate-700 text-center font-bold">
+                    <div>
+                      <p className="font-black text-slate-900 mb-9 leading-none">المستلم</p>
+                      <div className="border-b border-dashed border-slate-300 mx-3"></div>
+                    </div>
+                    <div>
+                      <p className="font-black text-slate-900 mb-9 leading-none">مدير الصيانة</p>
+                      <div className="border-b border-dashed border-slate-300 mx-3"></div>
+                    </div>
+                    <div>
+                      <p className="font-black text-slate-900 mb-9 leading-none">مدير الحسابات</p>
+                      <div className="border-b border-dashed border-slate-300 mx-3"></div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* 2. DEDUCTION INDIVIDUAL/GROUP RECEIPT */}
             {type === 'deduction' && deductionData && (
