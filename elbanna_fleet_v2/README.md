@@ -140,3 +140,8 @@ git push -u origin main
 ```
 
 مبروك!🎉 سيتم رفع المشروع فوراً بمجلداته المقسمة والمنظمة بشكل نظيف واحترافي تماماً ليكون مرجعاً تقنياً جاهزاً للتطوير أو التقييم المشترك.
+
+## تطبيق الموبايل (APK) — طلبات النقل فقط
+- يتبني تلقائيًا من GitHub Actions (`.github/workflows/build-apk.yml`) عند كل push على main، أو يدويًا من تبويب Actions → Run workflow.
+- النتيجة: Artifact اسمه `elbanna-requests-apk` فيه `app-debug.apk`.
+- التطبيق = `src/MobileApp.tsx` (طلب جديد + متابعة الطلبات) ويتفعّل بـ `VITE_APP_MODE=requests`.
