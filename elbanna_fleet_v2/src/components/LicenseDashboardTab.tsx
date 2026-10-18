@@ -846,6 +846,16 @@ export const LicenseDashboardTab: React.FC = () => {
                   <span className="font-bold text-indigo-700 font-sans">{car.traffic_office || "غير محدد"}</span>
                 </div>
 
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-400 font-medium shrink-0">الرقم التأميني للسيارة:</span>
+                  <span className="font-mono font-bold text-slate-700 text-left break-all">{car.insurance_status || "غير محدد"}</span>
+                </div>
+
+                <div className="flex justify-between gap-2">
+                  <span className="text-slate-400 font-medium shrink-0">تاريخ انتهاء الترخيص:</span>
+                  <span className={`font-mono font-bold ${licStatus.status === 'expired' ? 'text-rose-600' : licStatus.status === 'near_expiry' ? 'text-amber-600' : 'text-slate-700'}`}>{car.license_end_date || "غير محدد"}</span>
+                </div>
+
                 <div className="flex justify-between items-center pt-1 border-t border-slate-50/50">
                   <span className="text-slate-400 font-medium flex items-center gap-1">
                     <FlameKindling className="w-3.5 h-3.5 text-rose-500" />

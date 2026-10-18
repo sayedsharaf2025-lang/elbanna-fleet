@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.elbanna.requests',
-  appName: 'طلبات النقل - البنا',
+  appName: 'البنا جروب',
   webDir: 'dist',
   android: { allowMixedContent: false },
 };

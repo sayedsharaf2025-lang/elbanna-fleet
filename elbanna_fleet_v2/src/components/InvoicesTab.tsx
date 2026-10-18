@@ -491,6 +491,13 @@ export const InvoicesTab: React.FC = () => {
     }));
   };
 
+  // مصدر العهدة اتشال من شاشة البند: لو مفيش حساب متحدد نستخدم حساب الكاش للمسؤول (وإلا أول حساب له)
+  const resolveItemAccountId = (officialId: string, accountId: string): string => {
+    if (accountId) return accountId;
+    const accs = db.custodyAccounts.filter(ca => ca.official_id === officialId);
+    return (accs.find(ca => ca.type === 'cash') || accs[0])?.id || '';
+  };
+
   // Dispatch Finalized Saved Invoice to persistent database & trigger A5 printable modal
   const handleFinalizeSaveVoucher = (draftId: string) => {
     const voucher = draftVouchers.find(v => v.id === draftId);
@@ -504,7 +511,7 @@ export const InvoicesTab: React.FC = () => {
       showStatus("الرجاء اختيار المركبة الواحدة المستهدفة بمصروفات هذا المستند!", "error");
       return;
     }
-    const emptyRow = voucher.items.some(i => !i.description || i.amount <= 0 || !i.accountId);
+    const emptyRow = voucher.items.some(i => !i.description || i.amount <= 0);
     if (emptyRow) {
       showStatus("الرجاء التأكد من كتابة توصيف كافة البنود وتحديد مبالغ وقيم الخصم بنجاح!", "error");
       return;
@@ -517,7 +524,7 @@ export const InvoicesTab: React.FC = () => {
       description: i.description,
       amount: i.amount,
       payment_method: i.paymentMethod,
-      account_id: i.accountId
+      account_id: resolveItemAccountId(voucher.officialId, i.accountId)
     }));
 
     const totalAmount = payloadItems.reduce((sum, item) => sum + item.amount, 0);
@@ -784,7 +791,7 @@ export const InvoicesTab: React.FC = () => {
       showStatus("الرجاء اختيار السيارة المرتبطة بالفاتورة السلف!", "error");
       return;
     }
-    const emptyRow = editInvoiceItems.some(i => !i.description || i.amount <= 0 || !i.accountId);
+    const emptyRow = editInvoiceItems.some(i => !i.description || i.amount <= 0);
     if (emptyRow) {
       showStatus("الرجاء ملء توصيفات وقيم كافة البنود وتحديد كارت الدفع بدقة مسبقًا!", "error");
       return;
@@ -798,7 +805,7 @@ export const InvoicesTab: React.FC = () => {
       description: itm.description,
       amount: itm.amount,
       payment_method: itm.paymentMethod,
-      account_id: itm.accountId
+      account_id: resolveItemAccountId(editInvoiceOfficialId, itm.accountId)
     }));
 
     // Update invoice header properties first
@@ -1184,8 +1191,8 @@ export const InvoicesTab: React.FC = () => {
                             </div>
                           </div>
 
-                          <div className="md:col-span-4 text-right">
-                            <label className="block text-slate-500 mb-0.5 text-[10px]">الملخص الفني للبند</label>
+                          <div className="md:col-span-7 text-right">
+                            <label className="block text-slate-500 mb-0.5 text-[10px]">البند</label>
                             <input
                               type="text"
                               required
@@ -1193,23 +1200,6 @@ export const InvoicesTab: React.FC = () => {
                               value={itm.description}
                               onChange={(e) => handleUpdateEditItemRow(itm.id, 'description', e.target.value)}
                             />
-                          </div>
-
-                          <div className="md:col-span-3 text-right">
-                            <label className="block text-slate-500 mb-0.5 text-[10px]">الحساب / بطاقة الفيزا الفرعية المخصومة</label>
-                            <select
-                              required
-                              className="w-full p-2 rounded border border-slate-800 bg-slate-900 text-white font-bold text-xs"
-                              value={itm.accountId}
-                              onChange={(e) => handleUpdateEditItemRow(itm.id, 'accountId', e.target.value)}
-                            >
-                              <option value="">-- اختر بطاقة/خزنة الدفع --</option>
-                              {officialAccounts.map(a => (
-                                <option key={a.id} value={a.id}>
-                                  {a.name} ({a.type === 'cash' ? '💵 كاش' : '💳 فيزا'} | رصيد متوفر: {a.balance} ج.م)
-                                </option>
-                              ))}
-                            </select>
                           </div>
 
                           <div className="md:col-span-2 text-right">
@@ -1516,32 +1506,17 @@ export const InvoicesTab: React.FC = () => {
                               </div>
                             </div>
                             
-                            <div className="sm:col-span-3">
+                            <div className="sm:col-span-7">
                               <input
                                 type="text"
                                 required
                                 list="invoice-item-desc-datalist"
                                 autoComplete="off"
                                 className="w-full p-1.5 rounded border border-slate-850 bg-slate-950 text-[11px]"
-                                placeholder="فحص طفايات / تأمين / طابع..."
+                                placeholder="اكتب البند: فحص طفايات / تأمين / طابع..."
                                 value={row_item.description}
                                 onChange={(e) => handleUpdateDraftRow(v.id, row_item.id, 'description', e.target.value)}
                               />
-                            </div>
-
-                            <div className="sm:col-span-4">
-                              <select
-                                className="w-full p-1.5 rounded border border-slate-850 bg-slate-950 text-[11px] font-bold text-slate-200"
-                                value={row_item.accountId}
-                                onChange={(e) => handleUpdateDraftRow(v.id, row_item.id, 'accountId', e.target.value)}
-                              >
-                                <option value="">-- كرت الصرف المالي --</option>
-                                {targetedOfficialAccounts.map(a => (
-                                  <option key={a.id} value={a.id}>
-                                    {a.name} ({a.type === 'cash' ? '💵 كاش' : '💳 فيزا'} | رصيد متوفر: {a.balance} ج.م)
-                                  </option>
-                                ))}
-                              </select>
                             </div>
 
                             <div className="sm:col-span-2">

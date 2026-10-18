@@ -1,4 +1,4 @@
-name: Build Android APK (طلبات النقل)
+name: Build Android APK
 
 on:
   push:

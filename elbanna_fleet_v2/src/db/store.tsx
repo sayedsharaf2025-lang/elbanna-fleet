@@ -2587,6 +2587,44 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   }, []);
 
+  // مزامنة خفيفة لطلبات النقل: سحب من السحابة كل 15 ثانية وعند رجوع الشاشة للواجهة، ورفع أي طلب محلي ناقص
+  // (عشان طلب اتسجل من تطبيق الموبايل يظهر في الموقع من غير ريفرش، والعكس)
+  const transportRequestsRef = useRef(transportRequests);
+  transportRequestsRef.current = transportRequests;
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client) return;
+    let busy = false;
+    const sync = async () => {
+      if (busy || isDownloadingRef.current || document.visibilityState === 'hidden') return;
+      busy = true;
+      try {
+        const { data, error } = await client.from('transport_requests').select('*').order('request_number', { ascending: false });
+        if (error || !data) return;
+        const cloudIds = new Set(data.map((r: any) => r.id));
+        const cloudRows = notDeleted('transport_requests', data as any[]);
+        const localOnly = notDeleted('transport_requests', transportRequestsRef.current).filter(r => !cloudIds.has(r.id));
+        if (localOnly.length > 0) {
+          const { error: upErr } = await client.from('transport_requests').upsert(localOnly as any[]);
+          if (upErr) setCloudError(`تعذر رفع الطلبات للسحابة: ${upErr.message}`);
+        }
+        const merged = [...cloudRows, ...localOnly];
+        const sameShape = JSON.stringify([...merged].sort((a: any, b: any) => a.id.localeCompare(b.id))) ===
+          JSON.stringify([...transportRequestsRef.current].sort((a: any, b: any) => a.id.localeCompare(b.id)));
+        if (!sameShape) setTransportRequests(merged as any);
+      } catch (e) {
+        console.warn('transport_requests sync failed', e);
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = setInterval(sync, 15000);
+    const onVisible = () => { if (document.visibilityState === 'visible') sync(); };
+    document.addEventListener('visibilitychange', onVisible);
+    sync();
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, []);
+
   // RESET STORE TO INITIAL
   const resetToInitial = () => {
     setDrivers(INITIAL_DRIVERS);
@@ -2685,9 +2723,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     newRequest.destinations.forEach(d => addFarmIfNew(d));
 
     const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
-      supabase.from('transport_requests').insert([newRequest]).then(({ error }) => {
-        if (error) console.error("Supabase insert transport_request error:", error);
+    if (supabase) {
+      supabase.from('transport_requests').upsert([newRequest]).then(({ error }) => {
+        if (error) { console.error("Supabase insert transport_request error:", error); setCloudError(`تعذر رفع الطلب للسحابة: ${error.message}`); }
       });
     }
     return newRequest;
@@ -2697,9 +2735,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     setTransportRequests(prev => prev.map(r => r.id === id ? { ...r, ...updatedFields } : r));
 
     const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
+    if (supabase) {
       supabase.from('transport_requests').update(updatedFields).eq('id', id).then(({ error }) => {
-        if (error) console.error("Supabase update transport_request error:", error);
+        if (error) { console.error("Supabase update transport_request error:", error); setCloudError(`تعذر تحديث الطلب في السحابة: ${error.message}`); }
       });
     }
   };
@@ -2712,7 +2750,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
 
     const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
+    if (supabase) {
       supabase.from('transport_requests').delete().eq('id', id).then(({ error }) => {
         if (error) console.error("Supabase delete transport_request error:", error);
       });
