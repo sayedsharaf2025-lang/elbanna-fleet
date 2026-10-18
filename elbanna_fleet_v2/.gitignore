@@ -1,7 +1,4 @@
-node_modules/
-dist/
-.env
+node_modules
+dist
+android
 .env.local
-*.log
-build/
-.DS_Store
