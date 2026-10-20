@@ -78,7 +78,7 @@ function DashboardLayout() {
     return user.allowedScreens || [];
   }, [db.currentUser, db.systemUsers]);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance' | 'maintenance_requests' | 'maintenance_parts' | 'maintenance_execution' | 'maintenance_review' | 'maintenance_accounting' | 'license_invoice_approvals' | 'car_monthly_costs' | 'driver_reports' | 'fuel_logs' | 'service_plans' | 'vehicle_profitability'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance_requests' | 'maintenance_parts' | 'maintenance_review' | 'maintenance_accounting' | 'license_invoice_approvals' | 'car_monthly_costs' | 'driver_reports' | 'fuel_logs' | 'service_plans' | 'vehicle_profitability'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   // المجموعة المفتوحة حاليًا في القايمة الجانبية (واحدة بس مفتوحة في كل مرة)
   const [openGroup, setOpenGroup] = useState<string | null>(null);
@@ -185,11 +185,9 @@ function DashboardLayout() {
     {
       type: 'group' as const, label: 'الصيانة', icon: Wrench,
       items: [
-        { id: 'maintenance' as const, label: 'قسم الصيانة', icon: Wrench },
-        { id: 'maintenance_requests' as const, label: 'طلبات الصيانة', icon: ClipboardList },
+        { id: 'maintenance_requests' as const, label: 'طلب الصيانة', icon: ClipboardList },
         { id: 'maintenance_parts' as const, label: 'قطع الغيار', icon: Package },
-        { id: 'maintenance_execution' as const, label: 'تنفيذ الصيانة', icon: Wrench },
-        { id: 'maintenance_review' as const, label: 'مراجعة واعتماد الصيانة', icon: CalendarCheck },
+        { id: 'maintenance_review' as const, label: 'مدير الصيانة', icon: CalendarCheck },
         { id: 'maintenance_accounting' as const, label: 'فواتير الصيانة', icon: Receipt },
       ]
     },
@@ -248,10 +246,10 @@ function DashboardLayout() {
   const maintCount = (statuses: string[]) => db.maintenanceRequests.filter(r => statuses.includes(r.status)).length;
   const badgeCounts: Record<string, number> = {
     license_invoice_approvals: db.invoices.filter(i => !i.is_deleted && i.approval_status === 'pending').length,
-    maintenance_parts: maintCount(['pending_parts']),
-    maintenance_execution: maintCount(['in_progress']),
-    maintenance_review: maintCount(['pending_review']),
-    maintenance_accounting: maintCount(['pending_invoice', 'invoiced']),
+    maintenance_requests: maintCount(['repaired']),
+    maintenance_parts: maintCount(['parts_requested']),
+    maintenance_review: maintCount(['new', 'parts_purchased', 'invoice_review', 'receipt_rejected']),
+    maintenance_accounting: maintCount(['pending_invoice', 'invoice_approved']),
   };
 
   // لما الشاشة النشطة تتغيّر (مثلًا بعد الدخول أو التحويل التلقائي) نفتح المجموعة اللي تحتها الشاشة دي
@@ -531,11 +529,9 @@ function DashboardLayout() {
             {activeTab === 'driver_reports' && <DriverReportsTab />}
             {activeTab === 'fuel_logs' && <FuelLogsTab />}
             {activeTab === 'service_plans' && <ServicePlansTab />}
-            {activeTab === 'maintenance' && <MaintenanceTab />}
             {activeTab === 'maintenance_requests' && <MaintenanceTab mode="requests" />}
             {activeTab === 'maintenance_parts' && <MaintenanceTab mode="parts" />}
-            {activeTab === 'maintenance_execution' && <MaintenanceTab mode="execution" />}
-            {activeTab === 'maintenance_review' && <MaintenanceTab mode="review" />}
+            {activeTab === 'maintenance_review' && <MaintenanceTab mode="manager" />}
             {activeTab === 'maintenance_accounting' && <MaintenanceTab mode="accounting" />}
             {activeTab === 'vehicle_profitability' && <VehicleProfitabilityTab />}
           </div>

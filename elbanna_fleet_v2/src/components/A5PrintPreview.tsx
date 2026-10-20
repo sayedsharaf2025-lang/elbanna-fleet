@@ -575,9 +575,9 @@ export const A5PrintPreview: React.FC<A5PrintPreviewProps> = ({
                         <th className="py-1.5 px-2 border border-slate-200">التاريخ</th>
                         <th className="py-1.5 px-2 border border-slate-200">البيان والحركة</th>
                         <th className="py-1.5 px-2 border border-slate-200 text-center">النوع</th>
-                        <th className="py-1.5 px-2 border border-slate-200 text-left">الوارد (إيداع)</th>
-                        <th className="py-1.5 px-2 border border-slate-200 text-left">المنصرف (خصم)</th>
-                        <th className="py-1.5 px-2 border border-slate-200 text-left bg-slate-100">الرصيد الجاري</th>
+                        <th className="py-1.5 px-2 border border-slate-200 text-left">دائن (عهدة)</th>
+                        <th className="py-1.5 px-2 border border-slate-200 text-left">مدين (فاتورة)</th>
+                        <th className="py-1.5 px-2 border border-slate-200 text-left bg-slate-100">الرصيد</th>
                       </tr>
                     </thead>
                     <tbody>

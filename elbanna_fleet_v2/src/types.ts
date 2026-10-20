@@ -263,12 +263,16 @@ export interface DriverAccountMovement {
 // ====== قسم الصيانة — مبني فوق قاعدة بيانات السيارات الحالية (car_id = Car.id)، بدون أي تكرار لبياناتها ======
 
 export type MaintenanceRequestStatus =
-  | 'pending_parts'   // بانتظار قطع الغيار
-  | 'in_progress'     // جاري التنفيذ
-  | 'pending_review'  // بانتظار مراجعة مدير الصيانة
-  | 'pending_invoice' // بانتظار فتح الفاتورة
-  | 'invoiced'        // تم إنشاء الفاتورة
-  | 'closed';         // مغلق
+  | 'new'              // عطل جديد — بانتظار إجراء مدير الصيانة
+  | 'parts_requested'  // طلب قطع غيار — عند شاشة قطع الغيار
+  | 'parts_purchased'  // تم الشراء — عند مدير الصيانة لتوجيهه للورشة
+  | 'in_workshop'      // جاري الصيانة بالورشة
+  | 'pending_invoice'  // تم الانتهاء — بانتظار كتابة الفاتورة
+  | 'invoice_review'   // الفاتورة اتحفظت — بانتظار اعتماد مدير الصيانة
+  | 'invoice_approved' // الفاتورة معتمدة — بانتظار الطباعة والإغلاق
+  | 'repaired'         // تم الإصلاح — بانتظار استلام مسجّل الطلب
+  | 'receipt_rejected' // رفض الاستلام — عند مدير الصيانة
+  | 'closed';          // مغلق
 
 // بند قطعة غيار داخل طلب الصيانة — المصدر بيحدد هل بتتحسب تكلفة عليها وقت الفاتورة (ورشة خارجية) أو لا (مخزن الشركة)
 export interface MaintenancePartItem {
@@ -302,6 +306,9 @@ export interface MaintenanceRequest {
   created_by?: string; // اسم المستخدم اللي سجل الطلب
   invoice_id?: string; // الفاتورة المرتبطة بالطلب لو اتعملت
   stage_history?: MaintenanceStageEntry[]; // سجل المراحل (نقل/إرجاع/سبب)
+  odometer?: number; // عداد السيارة وقت العطل (كم) — بيسجله مدير الصيانة
+  km_since_last?: number; // المسافة (كم) من آخر عطل لنفس السيارة — بتتحسب وقت تسجيل العداد
+  purchase_invoice_image?: string; // صورة فاتورة شراء قطع الغيار (مضغوطة، data URL)
 }
 
 // بند في فاتورة الصيانة — قطع غيار (منسوخة تلقائيًا من طلب الصيانة) أو مصنعية (المحاسب بيضيفها يدويًا)

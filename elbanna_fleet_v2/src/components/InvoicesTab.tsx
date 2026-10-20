@@ -198,12 +198,12 @@ export const InvoicesTab: React.FC = () => {
   // أرشيف الفواتير: التصفية (نفس منطق البحث القديم) + الفرز بالضغط على العنوان + الطباعة A4
   // الأرشيف مايعرضش أي فواتير غير لما يتكتب بحث (رقم السيارة / رقم الفاتورة / المسؤول) أو يتحدد تاريخ
   const hasArchiveCriteria = archiveSearchQuery.trim() !== '' || archiveDateFrom !== '' || archiveDateTo !== '';
-  const archiveFiltered = !hasArchiveCriteria ? [] : db.invoices.filter(i => {
+  const archiveFiltered: Invoice[] = !hasArchiveCriteria ? [] : db.invoices.filter(i => {
     const invDate = String(i.invoice_date || '').slice(0, 10);
     if (archiveDateFrom && invDate < archiveDateFrom) return false;
     if (archiveDateTo && invDate > archiveDateTo) return false;
     const q = archiveSearchQuery.toLowerCase().trim();
-    const official = db.officials.find(o => o.id === i.official_id);
+    const official = (db.officials.find(o => o.id === i.official_id) || (db.getOfficialName(i.official_id) ? ({ id: i.official_id, name: db.getOfficialName(i.official_id) + ' (محذوف)' } as any) : undefined));
     const targetCar = db.cars.find(c => c.id === i.car_id);
     const isMatch = !q ? true : (
       i.invoice_number.toLowerCase().includes(q) ||
@@ -225,7 +225,7 @@ export const InvoicesTab: React.FC = () => {
       case 'number': return inv.invoice_number;
       case 'date': return inv.invoice_date;
       case 'car': return db.cars.find(c => c.id === inv.car_id)?.car_number || 'سيارة عامة';
-      case 'official': return db.officials.find(o => o.id === inv.official_id)?.name || 'مشرف تراخيص';
+      case 'official': return (db.officials.find(o => o.id === inv.official_id) || (db.getOfficialName(inv.official_id) ? ({ id: inv.official_id, name: db.getOfficialName(inv.official_id) + ' (محذوف)' } as any) : undefined))?.name || 'مشرف تراخيص';
       default: return inv.total_amount;
     }
   });
@@ -249,7 +249,7 @@ export const InvoicesTab: React.FC = () => {
         i.invoice_number,
         i.invoice_date,
         db.cars.find(c => c.id === i.car_id)?.car_number || 'سيارة عامة',
-        db.officials.find(o => o.id === i.official_id)?.name || 'مشرف تراخيص',
+        (db.officials.find(o => o.id === i.official_id) || (db.getOfficialName(i.official_id) ? ({ id: i.official_id, name: db.getOfficialName(i.official_id) + ' (محذوف)' } as any) : undefined))?.name || 'مشرف تراخيص',
         i.is_deleted ? 'ملغاة' : (i.approval_status || 'approved') === 'pending' ? 'بانتظار المالية' : i.approval_status === 'returned' ? 'مرتجعة' : 'معتمدة',
         i.total_amount,
       ]),
@@ -268,7 +268,7 @@ export const InvoicesTab: React.FC = () => {
         subtitle: 'كل العهد والحسابات — الرصيد الجاري لكل مسؤول',
         user: printUserName,
         orientation: 'landscape',
-        headers: ['التاريخ', 'المسؤول', 'الحساب', 'البيان', 'النوع', 'الوارد (+)', 'المنصرف (-)', 'الرصيد الجاري'],
+        headers: ['التاريخ', 'المسؤول', 'الحساب', 'البيان', 'النوع', 'دائن (عهدة)', 'مدين (فاتورة)', 'الرصيد'],
         rows: rows.map(m => [
           m.date,
           db.officials.find(o => o.id === m.official_id)?.name || '',
@@ -288,7 +288,7 @@ export const InvoicesTab: React.FC = () => {
       subtitle: `المسؤول: ${db.officials.find(o => o.id === acc?.official_id)?.name || ''} — الرصيد الحالي: ${(acc?.balance ?? 0).toLocaleString()} ج.م`,
       user: printUserName,
       orientation: 'portrait',
-      headers: ['التاريخ', 'البيان', 'النوع', 'الوارد (+)', 'المنصرف (-)', 'الرصيد الجاري'],
+      headers: ['التاريخ', 'البيان', 'النوع', 'دائن (عهدة)', 'مدين (فاتورة)', 'الرصيد'],
       rows: rows.map(m => [m.date, m.description, MOVEMENT_TYPE_LABEL[m.type] || m.type, m.inflow || '-', m.outflow || '-', m.running]),
       totalsRow: ['الإجمالي', '', '', rows.reduce((s, m) => s + m.inflow, 0), rows.reduce((s, m) => s + m.outflow, 0), acc?.balance ?? 0],
     });
@@ -491,11 +491,20 @@ export const InvoicesTab: React.FC = () => {
     }));
   };
 
-  // مصدر العهدة اتشال من شاشة البند: لو مفيش حساب متحدد نستخدم حساب الكاش للمسؤول (وإلا أول حساب له)
-  const resolveItemAccountId = (officialId: string, accountId: string): string => {
-    if (accountId) return accountId;
-    const accs = db.custodyAccounts.filter(ca => ca.official_id === officialId);
-    return (accs.find(ca => ca.type === 'cash') || accs[0])?.id || '';
+  // مصدر العهدة اتشال من شاشة البند: الصرف بيتوزع تلقائيًا على حسابات المشرف — الكاش الأول، ولو
+  // رصيده مش كفاية بنكمل من باقي حساباته (عشان العهدة تتعامل كرصيد واحد)
+  const allocateItemAccounts = <T extends { amount: number; accountId?: string }>(officialId: string, items: T[]): string[] => {
+    const accs = db.custodyAccounts
+      .filter(ca => ca.official_id === officialId)
+      .sort((a, b) => (a.type === 'cash' ? 0 : 1) - (b.type === 'cash' ? 0 : 1));
+    const left: Record<string, number> = {};
+    accs.forEach(a => { left[a.id] = a.balance; });
+    return items.map(it => {
+      const pick = accs.find(a => left[a.id] >= it.amount) || accs[0];
+      if (!pick) return '';
+      left[pick.id] -= it.amount;
+      return pick.id;
+    });
   };
 
   // Dispatch Finalized Saved Invoice to persistent database & trigger A5 printable modal
@@ -520,12 +529,16 @@ export const InvoicesTab: React.FC = () => {
     const officialObj = db.officials.find(o => o.id === voucher.officialId);
     if (!officialObj) return;
 
-    const payloadItems = voucher.items.map(i => ({
-      description: i.description,
-      amount: i.amount,
-      payment_method: i.paymentMethod,
-      account_id: resolveItemAccountId(voucher.officialId, i.accountId)
-    }));
+    const allocated = allocateItemAccounts(voucher.officialId, voucher.items);
+    const payloadItems = voucher.items.map((i, idx) => {
+      const acc = db.custodyAccounts.find(ca => ca.id === allocated[idx]);
+      return {
+        description: i.description,
+        amount: i.amount,
+        payment_method: (acc ? (acc.type === 'cash' ? 'cash' : 'visa') : i.paymentMethod) as 'cash' | 'visa',
+        account_id: allocated[idx]
+      };
+    });
 
     const totalAmount = payloadItems.reduce((sum, item) => sum + item.amount, 0);
 
@@ -595,9 +608,10 @@ export const InvoicesTab: React.FC = () => {
   const [transferAmount, setTransferAmount] = useState(0);
   const [transferDesc, setTransferDesc] = useState('');
 
-  // Settle manual edit adjustment state
-  const [adjustingAccountId, setAdjustingAccountId] = useState<string | null>(null);
-  const [adjustingBalance, setAdjustingBalance] = useState(0);
+  // إضافة عهدة جديدة (دائن) على حساب مشرف — بدل التسوية اليدوية القديمة
+  const [fundingAccountId, setFundingAccountId] = useState<string | null>(null);
+  const [fundingAmount, setFundingAmount] = useState(0);
+  const [fundingNote, setFundingNote] = useState('');
 
   const handleCreateOfficial = (e: React.FormEvent) => {
     e.preventDefault();
@@ -673,16 +687,17 @@ export const InvoicesTab: React.FC = () => {
     }
   };
 
-  const handleStartAdjustBalance = (acc: CustodyAccount) => {
-    setAdjustingAccountId(acc.id);
-    setAdjustingBalance(acc.balance);
-  };
-
-  const handleSaveAdjustment = () => {
-    if (adjustingAccountId === null) return;
-    db.updateCustodyAccount(adjustingAccountId, { balance: adjustingBalance });
-    showStatus("تمت تسوية وتحديث الرصيد الفرعي بنجاح وتسجيل عملية التدقيق.", "success");
-    setAdjustingAccountId(null);
+  const handleSaveFunding = () => {
+    if (fundingAccountId === null) return;
+    const res = db.addCustodyFunds(fundingAccountId, fundingAmount, fundingNote);
+    if (!res.success) {
+      showStatus(res.error || 'تعذر تسجيل العهدة', 'error');
+      return;
+    }
+    showStatus(`تم تسجيل عهدة جديدة ${fundingAmount.toLocaleString()} ج.م (دائن) وإضافتها للرصيد.`, 'success');
+    setFundingAccountId(null);
+    setFundingAmount(0);
+    setFundingNote('');
   };
 
 
@@ -801,12 +816,16 @@ export const InvoicesTab: React.FC = () => {
     if (!official) return;
 
     // Convert payload
-    const formattedItems = editInvoiceItems.map(itm => ({
-      description: itm.description,
-      amount: itm.amount,
-      payment_method: itm.paymentMethod,
-      account_id: resolveItemAccountId(editInvoiceOfficialId, itm.accountId)
-    }));
+    const editAllocated = allocateItemAccounts(editInvoiceOfficialId, editInvoiceItems);
+    const formattedItems = editInvoiceItems.map((itm, idx) => {
+      const acc = db.custodyAccounts.find(ca => ca.id === editAllocated[idx]);
+      return {
+        description: itm.description,
+        amount: itm.amount,
+        payment_method: (acc ? (acc.type === 'cash' ? 'cash' : 'visa') : itm.paymentMethod) as 'cash' | 'visa',
+        account_id: editAllocated[idx]
+      };
+    });
 
     // Update invoice header properties first
     db.updateCar(editInvoiceTargetCarId, {}); // dummy update to spark react
@@ -896,7 +915,7 @@ export const InvoicesTab: React.FC = () => {
   };
 
   const handleDeleteInvoiceClick = (inv: Invoice) => {
-    const sup = db.officials.find(o => o.id === inv.official_id);
+    const sup = (db.officials.find(o => o.id === inv.official_id) || (db.getOfficialName(inv.official_id) ? ({ id: inv.official_id, name: db.getOfficialName(inv.official_id) + ' (محذوف)' } as any) : undefined));
     const supName = sup ? sup.name : "مشرف تراخيص";
 
     if (confirm(`تحذير محاسبي: ستقوم تصفية الفاتورة ${inv.invoice_number} برد مبالغ الصرف بالكامل إلى العهد الفرعية والبطاقات البنكية التي تم سحب المعاملة منها مسبقًا وتصحيح الموازنة ماليًا. هل تريد المتابعة؟`)) {
@@ -910,7 +929,7 @@ export const InvoicesTab: React.FC = () => {
   };
 
   const handleRestoreInvoiceClick = (inv: Invoice) => {
-    const sup = db.officials.find(o => o.id === inv.official_id);
+    const sup = (db.officials.find(o => o.id === inv.official_id) || (db.getOfficialName(inv.official_id) ? ({ id: inv.official_id, name: db.getOfficialName(inv.official_id) + ' (محذوف)' } as any) : undefined));
     const supName = sup ? sup.name : "مشرف تراخيص";
 
     if (confirm(`محاسبة: هل تود إعادة تفعيل الفاتورة الملغاة ${inv.invoice_number}؟ سيقوم هذا الإجراء بإعادة خصم قيمتها من أرصدة العهد الفرعية والبطاقات كما كانت في حالتها الأصلية.`)) {
@@ -927,7 +946,7 @@ export const InvoicesTab: React.FC = () => {
   const canModifyInvoice = (inv: Invoice) => (inv.approval_status || 'approved') !== 'approved' || db.currentUser?.role === 'admin';
 
   const handlePurgeInvoiceClick = (inv: Invoice) => {
-    const sup = db.officials.find(o => o.id === inv.official_id);
+    const sup = (db.officials.find(o => o.id === inv.official_id) || (db.getOfficialName(inv.official_id) ? ({ id: inv.official_id, name: db.getOfficialName(inv.official_id) + ' (محذوف)' } as any) : undefined));
     const supName = sup ? sup.name : "مشرف تراخيص";
 
     if (confirm(`⚠️ خطر جسيم: ستقوم حالاً بالحذف النهائي والمطلق للفاتورة رقم ${inv.invoice_number} وبنودها التفصيلية بالكامل من خوادم النظام وقاعدة البيانات بشكل تدميري كامل ولا يمكن التراجع أو الاسترجاع بعدها أبداً!\n\nفي حال لم تكن الفاتورة ملغاة مسبقاً، سيقوم النظام تلقائياً أولاً بتعديل العهد ورد المبالغ ماليّاً لتطبيق تسوية الموازنة قبل حذف الفاتورة ومصروفاتها.\n\nهل تود تأكيد الحذف النهائي والتام بلا عودة؟`)) {
@@ -1682,7 +1701,7 @@ export const InvoicesTab: React.FC = () => {
                       }
 
                       return filtered.map(inv => {
-                        const official = db.officials.find(o => o.id === inv.official_id);
+                        const official = (db.officials.find(o => o.id === inv.official_id) || (db.getOfficialName(inv.official_id) ? ({ id: inv.official_id, name: db.getOfficialName(inv.official_id) + ' (محذوف)' } as any) : undefined));
                         const targetCar = db.cars.find(c => c.id === inv.car_id);
                         return (
                           <tr key={inv.id} className={`border-b border-white/5 hover:bg-white/[0.02] ${inv.is_deleted ? 'opacity-50 bg-rose-950/5' : ''}`}>
@@ -2112,7 +2131,7 @@ export const InvoicesTab: React.FC = () => {
                       
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {db.custodyAccounts.filter(ca => ca.official_id === selectedOfficialForDetail).map(acc => {
-                          const isEditingThis = adjustingAccountId === acc.id;
+                          const isEditingThis = fundingAccountId === acc.id;
 
                           return (
                             <div key={acc.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3 relative overflow-hidden flex flex-col justify-between">
@@ -2135,32 +2154,43 @@ export const InvoicesTab: React.FC = () => {
                               </div>
 
                               <div className="bg-slate-900 p-2 rounded border border-slate-850 flex items-center justify-between">
-                                <span className="text-[10px] text-slate-500 font-bold">الرصيد المشحون:</span>
-                                {isEditingThis ? (
+                                <span className="text-[10px] text-slate-500 font-bold">الرصيد الحالي:</span>
+                                <span className="font-mono text-xs font-black text-emerald-400">{acc.balance.toLocaleString()} ج.م</span>
+                              </div>
+
+                              {isEditingThis && (
+                                <div className="space-y-1.5 bg-slate-900/60 p-2 rounded border border-emerald-900/30">
                                   <input
                                     type="number"
-                                    className="p-1 rounded bg-slate-950 border border-slate-700 text-yellow-400 text-right w-24 font-mono font-extrabold"
-                                    value={adjustingBalance}
-                                    onChange={(e) => setAdjustingBalance(Number(e.target.value))}
+                                    min={1}
+                                    placeholder="مبلغ العهدة الجديدة ج.م"
+                                    className="w-full p-1.5 rounded bg-slate-950 border border-slate-700 text-yellow-400 font-mono font-extrabold text-[11px]"
+                                    value={fundingAmount || ''}
+                                    onChange={(e) => setFundingAmount(Number(e.target.value))}
                                   />
-                                ) : (
-                                  <span className="font-mono text-xs font-black text-emerald-400">{acc.balance.toLocaleString()} ج.م</span>
-                                )}
-                              </div>
+                                  <input
+                                    type="text"
+                                    placeholder="بيان (اختياري)"
+                                    className="w-full p-1.5 rounded bg-slate-950 border border-slate-700 text-[11px]"
+                                    value={fundingNote}
+                                    onChange={(e) => setFundingNote(e.target.value)}
+                                  />
+                                </div>
+                              )}
 
                               <div className="flex justify-end gap-1.5 text-[10px] pt-1">
                                 {isEditingThis ? (
                                   <>
                                     <button
                                       type="button"
-                                      onClick={handleSaveAdjustment}
+                                      onClick={handleSaveFunding}
                                       className="bg-emerald-600 text-white font-bold px-2.5 py-1 rounded hover:bg-emerald-550"
                                     >
-                                      حفظ التسوية
+                                      تسجيل العهدة (دائن)
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => setAdjustingAccountId(null)}
+                                      onClick={() => setFundingAccountId(null)}
                                       className="bg-slate-800 text-slate-400 px-2 py-1 rounded"
                                     >
                                       إلغاء
@@ -2170,10 +2200,10 @@ export const InvoicesTab: React.FC = () => {
                                   <>
                                     <button
                                       type="button"
-                                      onClick={() => handleStartAdjustBalance(acc)}
-                                      className="bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800 px-2.5 py-1 rounded"
+                                      onClick={() => { setFundingAccountId(acc.id); setFundingAmount(0); setFundingNote(''); }}
+                                      className="bg-emerald-950/50 text-emerald-400 border border-emerald-900/30 px-2.5 py-1 rounded hover:bg-emerald-950/80"
                                     >
-                                      تعديل وتسوية الرصيد
+                                      + إضافة عهدة جديدة
                                     </button>
                                     <button
                                       type="button"
@@ -2199,8 +2229,8 @@ export const InvoicesTab: React.FC = () => {
             <div className="bg-slate-900 p-5 rounded-2xl border border-slate-800 space-y-4">
               <div className="border-b border-slate-800 pb-2.5 flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
                 <div>
-                  <h3 className="font-bold text-slate-100 text-sm">سجل كشف حساب حركات العهد والتسويات التفصيلي</h3>
-                  <p className="text-[11px] text-slate-400">كافة الرواتب، التسويات المباشرة، معاملات التحويلات ومصروفات ترخيص المركبات التاريخية.</p>
+                  <h3 className="font-bold text-slate-100 text-sm">كشف حساب العهدة: حركة (دائن / مدين) ثم الرصيد</h3>
+                  <p className="text-[11px] text-slate-400">كل عهدة جديدة بتتسجل دائن، وكل فاتورة معتمدة بتتخصم مدين، والرصيد بيتحسب بعد كل حركة.</p>
                 </div>
                 <div className="flex items-center gap-1.5 min-w-[200px]">
                   <span className="text-slate-400 text-[10px] whitespace-nowrap font-bold">تصفية العهدة:</span>
@@ -2243,9 +2273,9 @@ export const InvoicesTab: React.FC = () => {
                         <th className="py-2 px-2.5">التاريخ</th>
                         <th className="py-2 px-2.5">الحساب الفرعي</th>
                         <th className="py-2 px-2.5">البيان وقيد الحركة</th>
-                        <th className="py-2 px-2.5 text-left">الوارد (+)</th>
-                        <th className="py-2 px-2.5 text-left">المنصرف (-)</th>
-                        <th className="py-2 px-2.5 text-left bg-emerald-950/10 text-emerald-300 font-extrabold">رصيد الحساب الجاري</th>
+                        <th className="py-2 px-2.5 text-left">دائن (عهدة جديدة)</th>
+                        <th className="py-2 px-2.5 text-left">مدين (فاتورة)</th>
+                        <th className="py-2 px-2.5 text-left bg-emerald-950/10 text-emerald-300 font-extrabold">الرصيد</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2311,9 +2341,9 @@ export const InvoicesTab: React.FC = () => {
                       <tr className="bg-slate-950 text-slate-400">
                         <th className="py-2 px-2.5">التاريخ</th>
                         <th className="py-2 px-2.5">البيان والحركة</th>
-                        <th className="py-2 px-2.5 text-left">الوارد (+)</th>
-                        <th className="py-2 px-2.5 text-left">المنصرف (-)</th>
-                        <th className="py-2 px-2.5 text-left bg-emerald-950/10 text-emerald-300 font-extrabold">الرصيد الجاري</th>
+                        <th className="py-2 px-2.5 text-left">دائن (عهدة جديدة)</th>
+                        <th className="py-2 px-2.5 text-left">مدين (فاتورة)</th>
+                        <th className="py-2 px-2.5 text-left bg-emerald-950/10 text-emerald-300 font-extrabold">الرصيد</th>
                       </tr>
                     </thead>
                     <tbody>

@@ -46,8 +46,6 @@ export interface DbContextType {
   addMaintenanceRequest: (data: {
     car_id: string;
     fault_description: string;
-    workshop_type: 'company' | 'external';
-    workshop_name?: string;
     request_date: string;
   }) => MaintenanceRequest;
   updateMaintenanceRequest: (id: string, updatedFields: Partial<MaintenanceRequest> & { _note?: string; _kind?: 'advance' | 'return' }) => void;
@@ -101,6 +99,8 @@ export interface DbContextType {
 
   // Custody Accounts Actions
   addCustodyAccount: (account: Omit<CustodyAccount, 'id'>) => CustodyAccount;
+  getOfficialName: (id: string) => string;
+  addCustodyFunds: (accountId: string, amount: number, description?: string) => { success: boolean; error?: string };
   updateCustodyAccount: (id: string, account: Partial<CustodyAccount>) => void;
   deleteCustodyAccount: (id: string) => void;
   transferCustody: (fromAccountId: string, toAccountId: string, amount: number, description: string) => { success: boolean; error?: string };

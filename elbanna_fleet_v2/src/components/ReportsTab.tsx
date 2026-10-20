@@ -1663,7 +1663,7 @@ export const ReportsTab: React.FC = () => {
           let matchQuery = true;
           if (invQuerySearch) {
             const q = invQuerySearch.toLowerCase().trim();
-            const officialObj = db.officials.find(o => o.id === inv.official_id);
+            const officialObj = (db.officials.find(o => o.id === inv.official_id) || (db.getOfficialName(inv.official_id) ? ({ id: inv.official_id, name: db.getOfficialName(inv.official_id) + ' (محذوف)' } as any) : undefined));
             matchQuery = 
               inv.invoice_number.toLowerCase().includes(q) ||
               (inv.license_location || '').toLowerCase().includes(q) ||
@@ -1735,7 +1735,7 @@ export const ReportsTab: React.FC = () => {
                 <tbody>
                   {filteredInvoices.map((inv, i) => {
                     const car = db.cars.find(c => c.id === inv.car_id);
-                    const official = db.officials.find(o => o.id === inv.official_id);
+                    const official = (db.officials.find(o => o.id === inv.official_id) || (db.getOfficialName(inv.official_id) ? ({ id: inv.official_id, name: db.getOfficialName(inv.official_id) + ' (محذوف)' } as any) : undefined));
                     const items = db.invoiceItems.filter(it => it.invoice_id === inv.id);
                     return (
                       <tr key={inv.id} className="border-b border-slate-800 hover:bg-slate-900/50 text-slate-300">

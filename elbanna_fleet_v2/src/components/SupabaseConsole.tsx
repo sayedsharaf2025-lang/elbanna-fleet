@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   id TEXT PRIMARY KEY,
   invoice_number VARCHAR(30) UNIQUE NOT NULL,
   invoice_date DATE NOT NULL,
-  official_id TEXT REFERENCES officials(id) ON DELETE CASCADE,
+  official_id TEXT,
   total_amount DECIMAL(12, 2) NOT NULL,
   version INT DEFAULT 1,
   is_modified BOOLEAN DEFAULT FALSE,
@@ -194,6 +194,8 @@ CREATE TABLE IF NOT EXISTS invoices (
 );
 
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS car_location TEXT;
+-- حذف المشرف مايمسحش فواتيره: شيل ربط الفاتورة بالمشرف (كان ON DELETE CASCADE)
+ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_official_id_fkey;
 
 -- موافقة المالية على فواتير التراخيص (الفواتير القديمة تتعامل كمعتمدة)
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'approved';
@@ -292,11 +294,14 @@ CREATE TABLE IF NOT EXISTS maintenance_requests (
   workshop_name VARCHAR(150),
   request_date DATE NOT NULL,
   maintenance_date DATE,
-  status VARCHAR(20) CHECK (status IN ('pending_parts', 'in_progress', 'pending_review', 'pending_invoice', 'invoiced', 'closed')) DEFAULT 'pending_parts',
+  status VARCHAR(30) DEFAULT 'new',
   parts JSONB DEFAULT '[]'::jsonb,
   work_performed TEXT DEFAULT '',
   created_by VARCHAR(100),
-  invoice_id TEXT
+  invoice_id TEXT,
+  odometer NUMERIC(12,0),
+  km_since_last NUMERIC(12,0),
+  purchase_invoice_image TEXT
 );
 
 -- 14. Maintenance Invoices Table (فواتير الصيانة) — بنود قطع الغيار تُنسخ تلقائيًا من الطلب،
@@ -400,6 +405,13 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);
 
 -- 17. سجل مراحل الصيانة + إرجاع فواتير التراخيص بسبب
 ALTER TABLE maintenance_requests ADD COLUMN IF NOT EXISTS stage_history JSONB DEFAULT '[]'::jsonb;
+-- 18. سير عمل الصيانة الجديد: حالات جديدة + العداد + صورة فاتورة الشراء
+ALTER TABLE maintenance_requests DROP CONSTRAINT IF EXISTS maintenance_requests_status_check;
+ALTER TABLE maintenance_requests ALTER COLUMN status TYPE VARCHAR(30);
+ALTER TABLE maintenance_requests ALTER COLUMN status SET DEFAULT 'new';
+ALTER TABLE maintenance_requests ADD COLUMN IF NOT EXISTS odometer NUMERIC(12,0);
+ALTER TABLE maintenance_requests ADD COLUMN IF NOT EXISTS km_since_last NUMERIC(12,0);
+ALTER TABLE maintenance_requests ADD COLUMN IF NOT EXISTS purchase_invoice_image TEXT;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS return_reason TEXT;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS returned_by VARCHAR(100);
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS returned_at TIMESTAMPTZ;`;
@@ -450,7 +462,7 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS returned_at TIMESTAMPTZ;`;
   id TEXT PRIMARY KEY,
   invoice_number VARCHAR(30) UNIQUE NOT NULL,
   invoice_date DATE NOT NULL,
-  official_id TEXT REFERENCES officials(id),
+  official_id TEXT,
   total_amount DECIMAL(12, 2) NOT NULL,
   version INT DEFAULT 1,
   is_modified BOOLEAN DEFAULT FALSE,

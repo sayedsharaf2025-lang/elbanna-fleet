@@ -44,7 +44,7 @@ export function LicenseApprovalsTab() {
     const q = search.trim().toLowerCase();
     if (!q) return true;
     const car = db.cars.find(c => c.id === inv.car_id)?.car_number || '';
-    const off = db.officials.find(o => o.id === inv.official_id)?.name || '';
+    const off = (db.officials.find(o => o.id === inv.official_id) || (db.getOfficialName(inv.official_id) ? ({ id: inv.official_id, name: db.getOfficialName(inv.official_id) + ' (محذوف)' } as any) : undefined))?.name || '';
     return inv.invoice_number.toLowerCase().includes(q) || car.toLowerCase().includes(q) || off.toLowerCase().includes(q);
   };
 
@@ -106,7 +106,7 @@ export function LicenseApprovalsTab() {
       <div className="space-y-3">
         {shown.map(inv => {
           const car = db.cars.find(c => c.id === inv.car_id);
-          const official = db.officials.find(o => o.id === inv.official_id);
+          const official = (db.officials.find(o => o.id === inv.official_id) || (db.getOfficialName(inv.official_id) ? ({ id: inv.official_id, name: db.getOfficialName(inv.official_id) + ' (محذوف)' } as any) : undefined));
           const items = db.invoiceItems.filter(i => i.invoice_id === inv.id);
           const needs = tab === 'pending' ? accountNeeds(inv.id, inv.official_id) : [];
           const allEnough = needs.every(n => n.enough);

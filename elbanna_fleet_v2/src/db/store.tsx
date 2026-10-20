@@ -46,6 +46,7 @@ import {
 import { normalizeDateToYmd } from './dates';
 import { generateId } from './ids';
 import { maintenanceCostForCarDay } from './logic/maintenanceCost';
+import { normalizeMaintenanceRequest } from './logic/maintenanceFlow';
 import { loadSavedArray, loadSavedObject, cleanupMockData } from './storage';
 import type { DbContextType } from './storeTypes';
 import { DEFAULT_ROLE_PERMISSIONS, mergeNewDefaultScreens } from './permissions';
@@ -560,9 +561,11 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   );
 
   // ====== قسم الصيانة — مبني فوق قاعدة بيانات السيارات الحالية (car_id = Car.id)، بدون أي تكرار لبياناتها ======
-  const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>(() =>
-    loadSavedArray('elbanna_maintenance_requests', [])
-  );
+  const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>(() => {
+    // الطلبات المحفوظة بالحالات القديمة بتتحوّل لأقرب مرحلة في سير العمل الجديد
+    const invs = loadSavedArray<MaintenanceInvoice>('elbanna_maintenance_invoices', []);
+    return loadSavedArray<MaintenanceRequest>('elbanna_maintenance_requests', []).map(r => normalizeMaintenanceRequest(r as any, invs) as MaintenanceRequest);
+  });
   const [maintenanceInvoices, setMaintenanceInvoices] = useState<MaintenanceInvoice[]>(() =>
     loadSavedArray('elbanna_maintenance_invoices', [])
   );
@@ -1346,6 +1349,20 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     tombstonesRef.current = t;
     try { localStorage.setItem(TOMBSTONE_KEY, JSON.stringify(t)); } catch (e) { console.warn('tombstones save error', e); }
   };
+  // أسماء المشرفين المحذوفين (عشان الفواتير اللي باسمهم تفضل ظاهرة بالاسم بعد حذف المشرف)
+  const DELETED_NAMES_KEY = 'elbanna_deleted_official_names';
+  const [deletedOfficialNames, setDeletedOfficialNames] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem(DELETED_NAMES_KEY) || '{}') || {}; } catch { return {}; }
+  });
+  const saveDeletedOfficialNames = (next: Record<string, string>) => {
+    setDeletedOfficialNames(next);
+    try { localStorage.setItem(DELETED_NAMES_KEY, JSON.stringify(next)); } catch {}
+    const client = getSupabaseClient();
+    if (client) {
+      client.from('system_settings').upsert({ key: 'deleted_official_names', value: JSON.stringify(next) })
+        .then(({ error }) => { if (error) console.warn('push deleted official names error:', error.message); });
+    }
+  };
   const notDeleted = <T extends { id: string }>(table: string, rows: T[]): T[] => {
     const ids = tombstonesRef.current[table];
     if (!ids || ids.length === 0) return rows;
@@ -1691,6 +1708,15 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           saveTombstones(merged);
         }
       } catch (e) { console.warn('load tombstones error', e); }
+      try {
+        const { data: dnRow } = await supabase.from('system_settings').select('value').eq('key', 'deleted_official_names').maybeSingle();
+        if (dnRow?.value) {
+          const cloudNames = JSON.parse(dnRow.value) as Record<string, string>;
+          const mergedNames = { ...cloudNames, ...JSON.parse(localStorage.getItem(DELETED_NAMES_KEY) || '{}') };
+          setDeletedOfficialNames(mergedNames);
+          try { localStorage.setItem(DELETED_NAMES_KEY, JSON.stringify(mergedNames)); } catch {}
+        }
+      } catch (e) { console.warn('load deleted official names error', e); }
 
       const staleCloud: Record<string, string[]> = {};
       const stripDeleted = (table: string, res: any) => {
@@ -1850,7 +1876,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const cloudReqs = resMaintenanceRequests.data;
         const cloudIds = new Set(cloudReqs.map((r: any) => r.id));
         const localOnly = notDeleted('maintenance_requests', maintenanceRequests).filter(r => !cloudIds.has(r.id));
-        setMaintenanceRequests([...cloudReqs, ...localOnly]);
+        setMaintenanceRequests([...cloudReqs, ...localOnly].map((r: any) => normalizeMaintenanceRequest(r, (resMaintenanceInvoices.data as any[]) || maintenanceInvoices) as MaintenanceRequest));
       }
       if (resMaintenanceInvoices.data) {
         const cloudInvs = resMaintenanceInvoices.data;
@@ -2791,8 +2817,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const addMaintenanceRequest = (data: {
     car_id: string;
     fault_description: string;
-    workshop_type: 'company' | 'external';
-    workshop_name?: string;
     request_date: string;
   }): MaintenanceRequest => {
     const newRequest: MaintenanceRequest = {
@@ -2800,14 +2824,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       request_number: generateMaintenanceRequestNumber(),
       car_id: data.car_id,
       fault_description: data.fault_description.trim(),
-      workshop_type: data.workshop_type,
-      workshop_name: data.workshop_name?.trim() || undefined,
+      workshop_type: 'company', // بيتحدد لاحقًا من مدير الصيانة عند التوجيه للورشة
       request_date: normalizeDateToYmd(data.request_date),
-      status: 'pending_parts',
+      status: 'new',
       parts: [],
       work_performed: '',
       created_by: currentUser?.name || currentUser?.username,
-      stage_history: [{ status: 'pending_parts', at: new Date().toISOString(), by: currentUser?.name || currentUser?.username, kind: 'create' }],
+      stage_history: [{ status: 'new', at: new Date().toISOString(), by: currentUser?.name || currentUser?.username, kind: 'create' }],
     };
     setMaintenanceRequests(prev => [...prev, newRequest]);
 
@@ -2853,19 +2876,25 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
-      const send = (payload: any, retried: boolean) => {
+      const OPTIONAL_COLS = ['stage_history', 'odometer', 'km_since_last', 'purchase_invoice_image'];
+      const send = (payload: any, stripped: string[]) => {
         supabase.from('maintenance_requests').update(payload).eq('id', id).then(({ error }) => {
           if (!error) return;
-          // لو عمود stage_history لسه ماتضافش في Supabase، نبعت باقي التغييرات من غيره بدل ما الحالة نفسها تفشل
-          if (!retried && 'stage_history' in payload && /stage_history/.test(error.message || '')) {
-            const { stage_history, ...rest } = payload;
-            if (Object.keys(rest).length > 0) send(rest, true);
+          // لو عمود جديد لسه ماتضافش في Supabase، نبعت باقي التغييرات من غيره بدل ما الحالة نفسها تفشل
+          const missing = OPTIONAL_COLS.find(c => c in payload && !stripped.includes(c) && new RegExp(c).test(error.message || ''));
+          if (missing) {
+            const { [missing]: _drop, ...rest } = payload;
+            if (Object.keys(rest).length > 0) send(rest, [...stripped, missing]);
+            if (missing !== 'stage_history') alert(`تنبيه: تم الحفظ على الجهاز، لكن عمود "${missing}" مش موجود في قاعدة البيانات السحابية. شغّل سكريبت الصيانة الجديد (maintenance-workflow.sql) مرة واحدة في Supabase SQL Editor.`);
             return;
           }
           console.error("Supabase update maintenance_request error:", error);
+          if (/status|check constraint|violates/i.test(error.message || '')) {
+            alert(`تنبيه: تم تحديث حالة الطلب على الجهاز ده بس. قاعدة البيانات السحابية رفضت الحالة الجديدة (${error.message}). شغّل سكريبت الصيانة الجديد (maintenance-workflow.sql) مرة واحدة في Supabase SQL Editor.`);
+          }
         });
       };
-      send(patch, false);
+      send(patch, []);
     }
   };
 
@@ -2921,7 +2950,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       created_by: currentUser?.name || currentUser?.username,
     };
     setMaintenanceInvoices(prev => [...prev, newInvoice]);
-    updateMaintenanceRequest(requestId, { invoice_id: newInvoice.id, status: req.status === 'closed' ? req.status : 'invoiced' });
+    updateMaintenanceRequest(requestId, { invoice_id: newInvoice.id });
 
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
@@ -3153,6 +3182,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   const deleteOfficial = (id: string) => {
+    // الفواتير اللي باسم المشرف بتفضل زي ما هي — بنحفظ اسمه عشان يفضل ظاهر عليها
+    const goneOfficial = officials.find(o => o.id === id);
+    if (goneOfficial) saveDeletedOfficialNames({ ...deletedOfficialNames, [id]: goneOfficial.name });
     setOfficials(prev => prev.filter(o => o.id !== id));
     setCustodyAccounts(prev => prev.filter(ca => ca.official_id !== id));
 
@@ -3172,6 +3204,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       });
     }
   };
+
+  const getOfficialName = (id: string): string => officials.find(o => o.id === id)?.name || deletedOfficialNames[id] || '';
 
   // Add Officials
   const addOfficial = (official: Omit<Official, 'id'>) => {
@@ -3360,7 +3394,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     return newAcc;
   };
 
-  const updateCustodyAccount = (id: string, updatedFields: Partial<CustodyAccount>) => {
+  const updateCustodyAccount = (id: string, fields: Partial<CustodyAccount>) => {
+    // الرصيد مبقاش يتعدّل يدويًا (اتلغت التسوية): الرصيد بيتغيّر بس بإضافة عهدة (دائن) أو بخصم فاتورة (مدين)
+    const { balance: _ignoredBalance, ...restFields } = fields;
+    const updatedFields: Partial<CustodyAccount> = restFields;
     let updatedAcc: CustodyAccount | undefined;
     let updatedParent: Official | undefined;
     let newMov: CustodyMovement | undefined;
@@ -3415,6 +3452,47 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       if (newMov) q.push(supabase.from('custody_movements').insert([newMov]));
       Promise.all(q).catch(e => console.error("Supabase updateCustodyAccount error:", e));
     }
+  };
+
+  // إضافة عهدة جديدة لحساب مشرف: حركة دائن (وارد) في كشف الحساب ويزيد الرصيد
+  const addCustodyFunds = (accountId: string, amount: number, description?: string): { success: boolean; error?: string } => {
+    const acc = custodyAccounts.find(a => a.id === accountId);
+    if (!acc) return { success: false, error: 'لم يتم العثور على حساب العهدة!' };
+    if (!(amount > 0)) return { success: false, error: 'اكتب مبلغ العهدة أكبر من صفر.' };
+    const today = new Date().toISOString().split('T')[0];
+    if (!canEditMonth(today)) return { success: false, error: MONTH_LOCKED_MSG };
+
+    const updatedAcc: CustodyAccount = { ...acc, balance: acc.balance + amount };
+    setCustodyAccounts(prev => prev.map(a => a.id === accountId ? updatedAcc : a));
+
+    const parent = officials.find(o => o.id === acc.official_id);
+    const updatedParent = parent ? {
+      ...parent,
+      cash_custody: acc.type === 'cash' ? parent.cash_custody + amount : parent.cash_custody,
+      visa_custody: acc.type !== 'cash' ? parent.visa_custody + amount : parent.visa_custody,
+    } : undefined;
+    if (updatedParent) setOfficials(prev => prev.map(o => o.id === acc.official_id ? updatedParent : o));
+
+    const mov: CustodyMovement = {
+      id: generateId("cm"),
+      official_id: acc.official_id,
+      to_account_id: accountId,
+      date: today,
+      description: (description && description.trim()) || `عهدة جديدة — ${acc.name}`,
+      amount,
+      type: 'deposit'
+    };
+    setCustodyMovements(prev => [mov, ...prev]);
+
+    const supabase = getSupabaseClient();
+    if (supabase && isCloudConnected) {
+      Promise.all([
+        supabase.from('custody_accounts').update({ balance: updatedAcc.balance }).eq('id', accountId),
+        updatedParent ? supabase.from('officials').update({ cash_custody: updatedParent.cash_custody, visa_custody: updatedParent.visa_custody }).eq('id', acc.official_id) : Promise.resolve(),
+        supabase.from('custody_movements').insert([mov])
+      ]).catch(e => console.error("Supabase addCustodyFunds error:", e));
+    }
+    return { success: true };
   };
 
   const deleteCustodyAccount = (id: string) => {
@@ -3846,7 +3924,24 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (invoice.approval_status === 'returned') return { success: false, error: 'الفاتورة مرتجعة لمستخدم التراخيص — لازم يعدّلها أو يعيد إرسالها الأول.' };
     if (!canEditMonth(invoice.invoice_date)) return { success: false, error: MONTH_LOCKED_MSG };
     const official = officials.find(o => o.id === invoice.official_id);
-    if (!official) return { success: false, error: 'المسؤول عن الفاتورة لم يعد متاحًا!' };
+    if (!official) {
+      // المشرف اتحذف: الفاتورة بتتعتمد وتتحمّل على السيارة، من غير خصم من عهدة (العهدة نفسها اتحذفت)
+      const approverName0 = currentUser?.name || currentUser?.username || 'المالية';
+      const approvedAt0 = new Date().toISOString();
+      const approved0: Invoice = { ...invoice, approval_status: 'approved', approved_by: approverName0, approved_at: approvedAt0 };
+      setInvoices(prev => prev.map(inv => inv.id === invoiceId ? approved0 : inv));
+      if (invoice.car_id) {
+        setCars(prev => prev.map(car => car.id === invoice.car_id
+          ? { ...car, license_total_cost: (car.license_total_cost || 0) + invoice.total_amount }
+          : car));
+      }
+      const supabase0 = getSupabaseClient();
+      if (supabase0 && isCloudConnected) {
+        supabase0.from('invoices').update({ approval_status: 'approved', approved_by: approverName0, approved_at: approvedAt0 }).eq('id', invoiceId)
+          .then(({ error }) => { if (error) console.error('Supabase approveInvoice (deleted official) error:', error); });
+      }
+      return { success: true };
+    }
 
     const items = invoiceItems.filter(itm => itm.invoice_id === invoiceId);
     const plan = planInvoiceApproval({ invoice, items, custodyAccounts, official });
@@ -5011,6 +5106,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         updateOfficialPassword,
         updateOfficialName,
         addCustodyAccount,
+        addCustodyFunds,
+        getOfficialName,
         updateCustodyAccount,
         deleteCustodyAccount,
         transferCustody,
