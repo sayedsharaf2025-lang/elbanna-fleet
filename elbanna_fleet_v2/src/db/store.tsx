@@ -2629,7 +2629,24 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (error || !data) return;
         const cloudIds = new Set(data.map((r: any) => r.id));
         const cloudRows = notDeleted('transport_requests', data as any[]);
-        const localOnly = notDeleted('transport_requests', transportRequestsRef.current).filter(r => !cloudIds.has(r.id));
+        let localOnly: any[] = notDeleted('transport_requests', transportRequestsRef.current).filter(r => !cloudIds.has(r.id));
+        // تعارض رقم الطلب: جهازين ولّدوا نفس الرقم (مثلًا 2610-0002) — نعيد ترقيم الطلب المحلي برقم متاح
+        const takenNumbers = new Set<string>((data as any[]).map(r => r.request_number));
+        const maxSeqFor = (prefix: string) => {
+          let m = 0;
+          [...(data as any[]), ...localOnly].forEach(r => {
+            const parts = String(r.request_number || '').split('-');
+            if (parts[0] === prefix) { const n = parseInt(parts[1] || '0', 10); if (!isNaN(n) && n > m) m = n; }
+          });
+          return m;
+        };
+        localOnly = localOnly.map(r => {
+          if (!takenNumbers.has(r.request_number)) { takenNumbers.add(r.request_number); return r; }
+          const prefix = String(r.request_number || '').split('-')[0] || '0000';
+          const next = `${prefix}-${String(maxSeqFor(prefix) + 1).padStart(4, '0')}`;
+          takenNumbers.add(next);
+          return { ...r, request_number: next };
+        });
         if (localOnly.length > 0) {
           const { error: upErr } = await client.from('transport_requests').upsert(localOnly as any[]);
           if (upErr) setCloudError(`تعذر رفع الطلبات للسحابة: ${upErr.message}`);

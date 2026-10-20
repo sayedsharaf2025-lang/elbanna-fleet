@@ -1,24 +1,29 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// المفتاح السري اللي ضفناه في Supabase للحماية (RLS)
-const appSecretFallback = 'elbanna_secure_2026_x8kP2mN9vQ4rT7wZ1yB5cF3hJ6lD0sA';
-const appSecret = (import.meta as any).env?.VITE_APP_SECRET || appSecretFallback;
-
-// قيم افتراضية في حال عدم وجود إعدادات محفوظة
-const dbUrlFallback = 'https://gjmicraivrnvslivxau.supabase.co';
-const dbKeyFallback = 'sb_publishable_DLMSN7R8GEibWbJXVTi_Q.mqemQ59';
-
-// Auto-upgrade: clear the OLD wrong project URL if still stored
-const storedUrl = localStorage.getItem('elbanna_supabase_url');
-if (storedUrl && storedUrl.includes('zudptuecpxjwrepynss')) {
-  localStorage.removeItem('elbanna_supabase_url');
-  localStorage.removeItem('elbanna_supabase_key');
-}
-
 export const getSupabaseConfig = () => {
-  const url = localStorage.getItem('elbanna_supabase_url') || (import.meta as any).env?.VITE_SUPABASE_URL || dbUrlFallback;
-  const key = localStorage.getItem('elbanna_supabase_key') || (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || dbKeyFallback;
+  const meta: any = import.meta;
+  const dbUrlFallback = 'https://jqnircagivrnvsljvxau.supabase.co';
+  const dbKeyFallback = 'sb_publishable_0LUMSN7RBGE1bIbWjXYI-Q_mpenQd59';
+
+  // Auto-upgrade: clear the OLD wrong project URL if still stored
+  const storedUrl = localStorage.getItem('elbanna_supabase_url');
+  if (storedUrl && storedUrl.includes('zudptuecpxjcwrepynss')) {
+    localStorage.removeItem('elbanna_supabase_url');
+    localStorage.removeItem('elbanna_supabase_key');
+  }
+
+  const url = localStorage.getItem('elbanna_supabase_url') || (meta.env ? meta.env.VITE_SUPABASE_URL : '') || dbUrlFallback;
+  const key = localStorage.getItem('elbanna_supabase_key') || (meta.env ? meta.env.VITE_SUPABASE_ANON_KEY : '') || dbKeyFallback;
   return { url: url.trim(), key: key.trim() };
+};
+
+// المفتاح السري للتطبيق (لو سياسات RLS في Supabase مضبوطة على هيدر x-app-secret):
+// localStorage (elbanna_app_secret) ← VITE_APP_SECRET. لو مش مضبوط مفيش هيدر بيتبعت.
+export const getAppSecret = (): string => {
+  const meta: any = import.meta;
+  let stored = '';
+  try { stored = localStorage.getItem('elbanna_app_secret') || ''; } catch {}
+  return (stored || (meta.env ? meta.env.VITE_APP_SECRET : '') || '').trim();
 };
 
 export const saveSupabaseConfig = (url: string, key: string) => {
@@ -34,35 +39,30 @@ export const clearSupabaseConfig = () => {
 let clientInstance: SupabaseClient | null = null;
 let lastUsedUrl = '';
 let lastUsedKey = '';
+let lastUsedSecret = '';
 
 export const getSupabaseClient = (): SupabaseClient | null => {
   const { url, key } = getSupabaseConfig();
-
   if (!url || !key) {
     clientInstance = null;
     return null;
   }
-
-  if (clientInstance && url === lastUsedUrl && key === lastUsedKey) {
+  
+  const secret = getAppSecret();
+  if (clientInstance && url === lastUsedUrl && key === lastUsedKey && secret === lastUsedSecret) {
     return clientInstance;
   }
-
+  
   try {
     clientInstance = createClient(url, key, {
       auth: {
         persistSession: false
       },
-      global: {
-        // إرسال المفتاح السري مع كل طلب لتفعيل الحماية (RLS)
-        fetch: (input: RequestInfo | URL, init?: RequestInit) => {
-          const headers = new Headers(init?.headers || {});
-          headers.set('x-app-secret', appSecret);
-          return fetch(input, { ...init, headers });
-        }
-      }
+      ...(secret ? { global: { headers: { 'x-app-secret': secret } } } : {})
     });
     lastUsedUrl = url;
     lastUsedKey = key;
+    lastUsedSecret = secret;
     return clientInstance;
   } catch (error) {
     console.error("Failed to initialize Supabase client:", error);

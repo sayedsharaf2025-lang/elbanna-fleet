@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { getSupabaseClient } from '../db/supabaseClient';
 import { useDb } from '../db/store';
 import { Lock, ShieldAlert, User, Key } from 'lucide-react';
 
@@ -8,6 +9,25 @@ export function LoginScreen() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // تشخيص السحابة: لو الجهاز مش شايف مستخدمين في السحابة نوضّح السبب بدل ما يفتح بـ admin/admin بصمت
+  const [cloudDiag, setCloudDiag] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const client = getSupabaseClient();
+      if (!client) { if (!cancelled) setCloudDiag('مفيش إعدادات سحابة على الجهاز ده (رابط Supabase والمفتاح) — البيانات مش هتظهر.'); return; }
+      try {
+        const { data, error: err } = await client.from('system_settings').select('key').eq('key', 'system_users').maybeSingle();
+        if (cancelled) return;
+        if (err) setCloudDiag(`تعذر قراءة السحابة: ${err.message}. اتأكد إن مشروع Supabase شغال (مش موقوف) وإن الرابط والمفتاح صح.`);
+        else if (!data) setCloudDiag('السحابة ردّت لكن مفيش فيها مستخدمين مسجلين. ده معناه غالبًا إن RLS مفعّل على الجداول (فبترجع فاضية) — شغّل أوامر DISABLE ROW LEVEL SECURITY من «إعدادات السحاب والـ SQL». لحد ما يتصلح، الدخول بيكون بـ admin / admin والبيانات مش ظاهرة.');
+        else setCloudDiag(null);
+      } catch (e: any) {
+        if (!cancelled) setCloudDiag(`تعذر الاتصال بالسحابة: ${e?.message || 'خطأ شبكة'}. اتأكد من الإنترنت.`);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +73,13 @@ export function LoginScreen() {
           <div className="bg-emerald-550/15 border border-emerald-500/30 text-emerald-400 rounded-xl p-3 mb-5 flex items-center gap-2.5 text-xs animate-pulse">
             <span className="w-3.5 h-3.5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin shrink-0"></span>
             <span className="font-medium">جاري مزامنة الإعدادات والأمان من السحابة الآن...</span>
+          </div>
+        )}
+
+        {cloudDiag && (
+          <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-xl p-3 mb-5 flex items-start gap-2.5 text-xs leading-relaxed">
+            <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <span className="font-bold">{cloudDiag}</span>
           </div>
         )}
 
