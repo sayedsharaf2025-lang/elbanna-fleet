@@ -2,6 +2,7 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import MobileApp from './MobileApp.tsx';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
 
 // Safely patch ResizeObserver to prevent infinite loops causing browser freezes and lag on mobile viewports/iframes (especially with Recharts)
@@ -33,7 +34,9 @@ if (typeof window !== 'undefined') {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {(import.meta as any).env?.VITE_APP_MODE === 'requests' ? <MobileApp /> : <App />}
+    <ErrorBoundary fullScreen>
+      {(import.meta as any).env?.VITE_APP_MODE === 'requests' ? <MobileApp /> : <App />}
+    </ErrorBoundary>
   </StrictMode>,
 );
 

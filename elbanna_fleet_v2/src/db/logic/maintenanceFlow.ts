@@ -27,7 +27,31 @@ export function normalizeMaintenanceRequest<T extends { status: string; invoice_
   r: T, invoices: Pick<MaintenanceInvoice, 'id' | 'status'>[] = []
 ): T & { status: MaintenanceRequestStatus } {
   const inv = r.invoice_id ? invoices.find(i => i.id === r.invoice_id) : undefined;
-  return { ...r, status: normalizeMaintenanceStatus(r.status, inv) };
+  const raw = r as any;
+  // Supabase بيرجّع null للأعمدة الفاضية — نحوّلها لـ undefined / مصفوفة فاضية عشان الشاشات ماتقعش
+  const numOrUndef = (v: unknown): number | undefined => (v === null || v === undefined || v === '' || isNaN(Number(v))) ? undefined : Number(v);
+  const strOrUndef = (v: unknown): string | undefined => (v === null || v === undefined || v === '') ? undefined : String(v);
+  const parseArr = (v: unknown): any[] => {
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string') { try { const x = JSON.parse(v); return Array.isArray(x) ? x : []; } catch { return []; } }
+    return [];
+  };
+  return {
+    ...r,
+    status: normalizeMaintenanceStatus(r.status, inv),
+    parts: parseArr(raw.parts),
+    stage_history: parseArr(raw.stage_history).filter((h: any) => h && typeof h.at === 'string'),
+    odometer: numOrUndef(raw.odometer),
+    km_since_last: numOrUndef(raw.km_since_last),
+    workshop_name: strOrUndef(raw.workshop_name),
+    maintenance_date: strOrUndef(raw.maintenance_date),
+    invoice_id: strOrUndef(raw.invoice_id),
+    purchase_invoice_image: strOrUndef(raw.purchase_invoice_image),
+    work_performed: raw.work_performed ?? '',
+    fault_description: raw.fault_description ?? '',
+    request_date: raw.request_date ? String(raw.request_date).slice(0, 10) : '',
+    request_number: raw.request_number ?? '',
+  };
 }
 
 // آخر عطل سابق لنفس السيارة (غير الطلب الحالي) — الأحدث بتاريخ الطلب ثم برقمه

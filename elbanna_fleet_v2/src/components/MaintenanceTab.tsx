@@ -15,6 +15,7 @@ import { useDb } from '../db/store';
 import { MaintenanceRequest, MaintenanceRequestStatus } from '../types';
 import { findPreviousFault, kmSinceLastFault } from '../db/logic/maintenanceFlow';
 import { A5PrintPreview } from './A5PrintPreview';
+import { ErrorBoundary } from './ErrorBoundary';
 import {
   Wrench, Search, Plus, Truck, User, Calendar, ClipboardList, Save, Trash2, FileText, Receipt,
   CheckCircle, ArrowLeft, Package, Building2, Printer, Camera, Gauge, X,
@@ -246,7 +247,11 @@ export function MaintenanceTab({ mode = 'requests' }: { mode?: MaintenanceMode }
       {view === 'detail' && activeRequestId && (() => {
         const req = db.maintenanceRequests.find(r => r.id === activeRequestId);
         if (!req) return null;
-        return <MaintenanceRequestDetail request={req} mode={mode} onToast={showToast} onDone={backToList} />;
+        return (
+          <ErrorBoundary key={req.id} label="تعذّر عرض تفاصيل طلب الصيانة" onReset={backToList}>
+            <MaintenanceRequestDetail request={req} mode={mode} onToast={showToast} onDone={backToList} />
+          </ErrorBoundary>
+        );
       })()}
     </div>
   );
@@ -367,8 +372,12 @@ function MaintenanceRequestDetail({ request, mode, onToast, onDone }: { request:
   const car = db.cars.find(c => c.id === request.car_id);
   const driverName = car?.driver_id ? (db.drivers.find(d => d.id === car.driver_id)?.name) : undefined;
   const previous = findPreviousFault(db.maintenanceRequests, request);
+  const parts = Array.isArray(request.parts) ? request.parts : [];
+  const prevOdo = typeof previous?.odometer === 'number' ? previous.odometer : undefined;
+  const reqOdo = typeof request.odometer === 'number' ? request.odometer : undefined;
+  const reqKm = typeof request.km_since_last === 'number' ? request.km_since_last : undefined;
   const [action, setAction] = useState<null | 'parts' | 'workshop'>(null);
-  const [odoDraft, setOdoDraft] = useState<string>(request.odometer !== undefined ? String(request.odometer) : '');
+  const [odoDraft, setOdoDraft] = useState<string>(typeof request.odometer === 'number' ? String(request.odometer) : '');
   const [showPrint, setShowPrint] = useState(false);
   const invoice = request.invoice_id ? db.maintenanceInvoices.find(i => i.id === request.invoice_id) : undefined;
 
@@ -392,7 +401,7 @@ function MaintenanceRequestDetail({ request, mode, onToast, onDone }: { request:
     ? `${request.workshop_type === 'external' ? 'ورشة خارجية' : 'ورشة الشركة'}: ${request.workshop_name}`
     : request.workshop_type === 'external' ? 'ورشة خارجية' : (['in_workshop', 'pending_invoice', 'invoice_review', 'invoice_approved', 'repaired', 'closed'].includes(request.status) ? 'ورشة الشركة' : '—');
 
-  const hist = request.stage_history || [];
+  const hist = (Array.isArray(request.stage_history) ? request.stage_history : []).filter(h => h && typeof h.at === 'string');
   const last = hist[hist.length - 1];
 
   // ---- إجراءات مدير الصيانة ----
@@ -406,7 +415,7 @@ function MaintenanceRequestDetail({ request, mode, onToast, onDone }: { request:
         {previous ? (
           <p className="text-[11px] text-slate-600">
             آخر عطل لنفس السيارة: <span className="font-bold">{previous.fault_description}</span> بتاريخ <span className="font-mono">{previous.request_date}</span>
-            {previous.odometer !== undefined && <> — العداد وقتها <span className="font-mono font-bold">{previous.odometer.toLocaleString()}</span> كم{odoDraft && !isNaN(Number(odoDraft)) && Number(odoDraft) >= previous.odometer ? <> (المسافة من آخر عطل: <span className="font-mono font-bold text-emerald-700">{(Number(odoDraft) - previous.odometer).toLocaleString()}</span> كم)</> : null}</>}
+            {prevOdo !== undefined && <> — العداد وقتها <span className="font-mono font-bold">{prevOdo.toLocaleString()}</span> كم{odoDraft && !isNaN(Number(odoDraft)) && Number(odoDraft) >= prevOdo ? <> (المسافة من آخر عطل: <span className="font-mono font-bold text-emerald-700">{(Number(odoDraft) - prevOdo).toLocaleString()}</span> كم)</> : null}</>}
           </p>
         ) : <p className="text-[11px] text-slate-400">مفيش عطل سابق مسجل لنفس السيارة.</p>}
       </div>
@@ -420,8 +429,8 @@ function MaintenanceRequestDetail({ request, mode, onToast, onDone }: { request:
       )}
       {action === 'parts' && <PartsRequestForm onCancel={() => setAction(null)} onSubmit={(rows) => {
         const patch = odometerPatch(); if (!patch) return;
-        const parts = rows.map((r, i) => ({ id: `part_${Date.now()}_${i}`, name: r.name, quantity: r.quantity, source: 'external_workshop' as const }));
-        move('parts_requested', { ...patch, parts: [...request.parts, ...parts] }, 'تم إرسال طلب قطع الغيار لشاشة قطع الغيار.');
+        const newParts = rows.map((r, i) => ({ id: `part_${Date.now()}_${i}`, name: r.name, quantity: r.quantity, source: 'external_workshop' as const }));
+        move('parts_requested', { ...patch, parts: [...parts, ...newParts] }, 'تم إرسال طلب قطع الغيار لشاشة قطع الغيار.');
       }} />}
       {action === 'workshop' && <WorkshopForm onCancel={() => setAction(null)} onConfirm={(type, name) => {
         const patch = odometerPatch(); if (!patch) return;
@@ -450,8 +459,8 @@ function MaintenanceRequestDetail({ request, mode, onToast, onDone }: { request:
         </div>
       )}
       {action === 'parts' && <PartsRequestForm onCancel={() => setAction(null)} onSubmit={(rows) => {
-        const parts = rows.map((r, i) => ({ id: `part_${Date.now()}_${i}`, name: r.name, quantity: r.quantity, source: 'external_workshop' as const }));
-        move('parts_requested', { parts: [...request.parts, ...parts] }, 'تم إرسال طلب قطع الغيار لشاشة قطع الغيار.');
+        const newParts = rows.map((r, i) => ({ id: `part_${Date.now()}_${i}`, name: r.name, quantity: r.quantity, source: 'external_workshop' as const }));
+        move('parts_requested', { parts: [...parts, ...newParts] }, 'تم إرسال طلب قطع الغيار لشاشة قطع الغيار.');
       }} />}
       {action === 'workshop' && <WorkshopForm onCancel={() => setAction(null)} onConfirm={(type, name) => move('in_workshop', { workshop_type: type, workshop_name: name }, 'تم توجيه الطلب للورشة مرة أخرى.')} />}
     </div>
@@ -478,8 +487,8 @@ function MaintenanceRequestDetail({ request, mode, onToast, onDone }: { request:
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px]">
           <div className="md:col-span-2"><p className="text-slate-400 font-bold">العطل</p><p className="font-bold text-slate-700">{request.fault_description}</p></div>
           <div><p className="text-slate-400 font-bold flex items-center gap-1"><Building2 className="w-3 h-3" /> جهة الصيانة</p><p className="font-bold text-slate-700">{workshopLabel}</p></div>
-          {request.odometer !== undefined && (
-            <div><p className="text-slate-400 font-bold flex items-center gap-1"><Gauge className="w-3 h-3" /> العداد</p><p className="font-bold text-slate-700 font-mono">{request.odometer.toLocaleString()} كم{request.km_since_last !== undefined ? ` — ${request.km_since_last.toLocaleString()} كم من آخر عطل` : ''}</p></div>
+          {reqOdo !== undefined && (
+            <div><p className="text-slate-400 font-bold flex items-center gap-1"><Gauge className="w-3 h-3" /> العداد</p><p className="font-bold text-slate-700 font-mono">{reqOdo.toLocaleString()} كم{reqKm !== undefined ? ` — ${reqKm.toLocaleString()} كم من آخر عطل` : ''}</p></div>
           )}
         </div>
 
@@ -487,10 +496,10 @@ function MaintenanceRequestDetail({ request, mode, onToast, onDone }: { request:
           <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-4 py-3 text-xs font-bold">رفض الاستلام{last.by ? ` بواسطة ${last.by}` : ''}: {last.note}</div>
         )}
 
-        {request.parts.length > 0 && (
+        {parts.length > 0 && (
           <div className="border border-slate-100 rounded-xl p-3 bg-slate-50 space-y-1.5">
             <p className="text-[11px] font-bold text-slate-500 flex items-center gap-1"><Package className="w-3.5 h-3.5 text-amber-500" /> قطع الغيار المطلوبة</p>
-            {request.parts.map(p => (
+            {parts.map(p => (
               <div key={p.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 text-xs border border-slate-100">
                 <span className="font-bold text-slate-700">{p.name}</span>
                 <span className="font-mono text-slate-500">× {p.quantity}</span>
@@ -579,7 +588,7 @@ function MaintenanceRequestDetail({ request, mode, onToast, onDone }: { request:
           type="maintenance_invoice"
           maintenanceInvoiceData={{
             invoice, request, carNumber: car?.car_number || '',
-            odometer: request.odometer !== undefined ? String(request.odometer) : '',
+            odometer: reqOdo !== undefined ? String(reqOdo) : '',
             workshopName: workshopLabel === '—' ? '' : workshopLabel,
             faultDescription: request.fault_description,
           }}
@@ -773,7 +782,7 @@ function MaintenanceInvoicePanel({ invoiceId, panelMode, canPrint, submitLabel, 
             invoice: canEditDiscount ? { ...invoice, discount: discountValue } : invoice,
             request,
             carNumber,
-            odometer: request?.odometer !== undefined ? String(request.odometer) : '',
+            odometer: typeof request?.odometer === 'number' ? String(request.odometer) : '',
             workshopName: workshop,
             faultDescription: request?.fault_description || '',
           }}

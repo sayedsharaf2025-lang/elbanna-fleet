@@ -2919,13 +2919,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const req = maintenanceRequests.find(r => r.id === requestId);
     if (!req) return;
     const newPart: MaintenancePartItem = { ...part, id: generateId('part') };
-    updateMaintenanceRequest(requestId, { parts: [...req.parts, newPart] });
+    updateMaintenanceRequest(requestId, { parts: [...(req.parts || []), newPart] });
   };
 
   const deleteMaintenancePart = (requestId: string, partId: string) => {
     const req = maintenanceRequests.find(r => r.id === requestId);
     if (!req) return;
-    updateMaintenanceRequest(requestId, { parts: req.parts.filter(p => p.id !== partId) });
+    updateMaintenanceRequest(requestId, { parts: (req.parts || []).filter(p => p.id !== partId) });
   };
 
   const deleteMaintenanceRequest = (id: string) => {
@@ -2946,7 +2946,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (req.invoice_id) {
       return maintenanceInvoices.find(i => i.id === req.invoice_id) || null;
     }
-    const partsItems: MaintenanceInvoiceItem[] = req.parts.map(p => ({
+    const partsItems: MaintenanceInvoiceItem[] = (req.parts || []).map(p => ({
       id: generateId('mii'),
       description: p.name,
       item_type: 'parts',
