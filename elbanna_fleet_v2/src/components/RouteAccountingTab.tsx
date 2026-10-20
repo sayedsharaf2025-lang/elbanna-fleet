@@ -4,6 +4,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
+import { useNavFocus } from '../hooks/useNavFocus';
 import { useDb } from '../db/store';
 import { TransportRequest, TransportRouteLegSmoke } from '../types';
 import {
@@ -46,6 +47,14 @@ export function RouteAccountingTab() {
     setToastMsg(text);
     setTimeout(() => setToastMsg(null), 3500);
   };
+
+  // فتح نافذة تسجيل دخان الرحلة مباشرة من إشعار انتهاء الرحلة
+  useNavFocus('route_accounting', (nav) => {
+    if (nav.entityType !== 'transport') return;
+    const target = db.transportRequests.find(r => r.id === nav.entityId);
+    if (!target || !target.assigned_car_id) { showToast('الطلب ده مش جاهز لحساب خط السير (مفيش سيارة مرتبطة بيه).'); return; }
+    setEditingRequestId(target.id);
+  });
 
   const driverNameFor = (driverId?: string) => {
     if (!driverId) return 'بدون سائق';

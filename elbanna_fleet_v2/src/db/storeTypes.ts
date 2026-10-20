@@ -5,8 +5,9 @@
 
 // شكل الـ Context الكامل للمتجر (منقول حرفيًا من store.tsx — تعريف أنواع فقط)
 
+import type { TripAction, TripPayload } from './logic/tripFlow';
 import type {
-  Driver, Official, Car, Violation, Invoice, InvoiceItem, InvoiceAuditLog, DriverAccountMovement,
+  AppNotification, Driver, Official, Car, Violation, Invoice, InvoiceItem, InvoiceAuditLog, DriverAccountMovement,
   CustodyAccount, CustodyMovement, User, TransportRequest, CostItemType, RoutePriceEntry,
   TransportRequestCost, CarDailyCost, CarMonthlyCost, FuelLog, ServicePlan, SystemUser,
   MaintenanceRequest, MaintenancePartItem, MaintenanceInvoice, MaintenanceInvoiceItem
@@ -39,6 +40,7 @@ export interface DbContextType {
   deleteTransportRequest: (id: string) => void;
   respondTransportRequestWithCar: (requestId: string, carId: string) => { success: boolean; error?: string };
   markTransportRequestDelivered: (requestId: string, executionDate?: string) => void;
+  advanceTransportTrip: (requestId: string, action: TripAction, payload?: TripPayload) => { success: boolean; error?: string };
 
   // قسم الصيانة — مبني فوق قاعدة بيانات السيارات الحالية (car_id = Car.id)
   maintenanceRequests: MaintenanceRequest[];
@@ -224,6 +226,16 @@ export interface DbContextType {
   // تسجيل دخول موحّد بدون اختيار قسم مقدمًا — اسم مستخدم وكلمة مرور بس، والنظام يتعرف على الحساب تلقائيًا
   loginAuto: (identifier: string, password: string) => Promise<{ success: boolean; error?: string }>;
   hasScreenPermission: (screenId: string) => boolean;
+  // الإشعارات المرئية للمستخدم الحالي حسب صلاحياته (الأحدث أولًا)
+  notifications: AppNotification[];
+  unreadNotificationCount: number;
+  markNotificationsRead: (ids: string[]) => void;
+  markAllNotificationsRead: () => void;
+  // بيعلّم الإشعار كمقروء ويرجّع الشاشة اللي لازم تتفتح (أو null لو المستخدم معندوش صلاحية)
+  openNotification: (n: AppNotification) => string | null;
+  // طلب تنقل معلّق: الشاشة المستهدفة بتفتح الطلب وتستهلكه بـ consumeNav
+  pendingNav: { screen: string; entityType: 'transport' | 'maintenance'; entityId: string; nonce: number } | null;
+  consumeNav: (nonce: number) => void;
   logout: () => void;
   adminPassword?: string;
   managerPassword?: string;

@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { useNavFocus } from '../hooks/useNavFocus';
 import { useDb } from '../db/store';
 import { TransportRequest } from '../types';
 import {
@@ -43,6 +44,15 @@ export function TransportRequestsTab() {
 
   // Track Status search state
   const [searchQuery, setSearchQuery] = useState('');
+
+  // فتح الطلب من إشعار: تبويب المتابعة مع البحث برقم الطلب
+  useNavFocus('transport_requests', (nav) => {
+    if (nav.entityType !== 'transport') return;
+    const target = db.transportRequests.find(r => r.id === nav.entityId);
+    if (!target) { setSearchQuery(''); setActiveSubTab('track_status'); return; }
+    setActiveSubTab('track_status');
+    setSearchQuery(target.request_number);
+  });
 
   // نوع السيارة: مقترحات من أنواع السيارات المسجلة فعليًا بالأسطول لضمان تطابق الفلترة لاحقًا
   const carTypeOptions = Array.from(

@@ -21,6 +21,7 @@ import { TransportCostSettingsTab } from './components/TransportCostSettingsTab'
 import { RouteAccountingTab } from './components/RouteAccountingTab';
 import { CarDailyCostsTab } from './components/CarDailyCostsTab';
 import { MaintenanceTab } from './components/MaintenanceTab';
+import { NotificationBell } from './components/NotificationBell';
 import { VehicleProfitabilityTab } from './components/VehicleProfitabilityTab';
 import { LicenseApprovalsTab } from './components/LicenseApprovalsTab';
 import { CarMonthlyCostsTab } from './components/CarMonthlyCostsTab';
@@ -96,7 +97,8 @@ function MobileShell() {
           </button>
           <span className="font-extrabold text-sm truncate">{current ? current.label : 'البنا جروب'}</span>
         </div>
-        <div className="flex items-center gap-3 text-xs shrink-0">
+        <div className="flex items-center gap-2 text-xs shrink-0">
+          <NotificationBell onNavigate={(screen) => { setTab(screen); setMenuOpen(false); }} />
           <span className="text-slate-300 font-bold truncate max-w-[90px]">👤 {user?.name || user?.username}</span>
           <button type="button" onClick={() => db.logout()} className="text-rose-400 font-black flex items-center gap-1">
             <LogOut className="w-4 h-4" /> خروج

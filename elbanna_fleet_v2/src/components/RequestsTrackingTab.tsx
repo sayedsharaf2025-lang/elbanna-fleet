@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useNavFocus } from '../hooks/useNavFocus';
 import { useDb } from '../db/store';
 import { TransportRequest } from '../types';
+import { describeTrip, TRIP_STATUS_LABELS } from '../db/logic/tripFlow';
 import {
   ClipboardList,
   Truck,
@@ -51,6 +53,21 @@ export function RequestsTrackingTab() {
   const [execDateDraft, setExecDateDraft] = useState('');
 
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // الطلب اللي اتفتح من إشعار: بيتعرض في حالته وبيتعلّم لحظات عشان يتلاقى بسهولة
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  useNavFocus('requests_tracking', (nav) => {
+    if (nav.entityType !== 'transport') return;
+    const target = db.transportRequests.find(r => r.id === nav.entityId);
+    if (!target) { setToastMsg({ type: 'error', text: 'الطلب ده مش موجود (اتحذف أو لسه ماوصلش للجهاز ده).' }); setTimeout(() => setToastMsg(null), 4000); return; }
+    setStatusFilter(target.status);
+    setHighlightId(target.id);
+  });
+  useEffect(() => {
+    if (!highlightId) return;
+    const scroll = setTimeout(() => document.getElementById(`req-card-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+    const clear = setTimeout(() => setHighlightId(null), 5000);
+    return () => { clearTimeout(scroll); clearTimeout(clear); };
+  }, [highlightId]);
 
   const showToast = (type: 'success' | 'error', text: string) => {
     setToastMsg({ type, text });
@@ -223,7 +240,7 @@ export function RequestsTrackingTab() {
         {requests.map(r => {
           const isEditing = editingId === r.id;
           return (
-            <div key={r.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+            <div key={r.id} id={`req-card-${r.id}`} className={`bg-white p-4 rounded-2xl border shadow-sm transition-all ${highlightId === r.id ? 'border-emerald-400 ring-2 ring-emerald-300' : 'border-slate-100'}`}>
 
               <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <span className="font-mono font-black text-slate-800 text-sm flex items-center gap-1.5">
@@ -338,6 +355,29 @@ export function RequestsTrackingTab() {
                           + (daily.extra_costs || []).reduce((sum, i) => sum + (i.amount || 0), 0);
                         return <span className="text-indigo-600">🚛 إجمالي مصاريف السيارة في {r.execution_date}: {dayTotal.toLocaleString()} ج.م</span>;
                       })()}
+                    </div>
+                  )}
+                  {r.trip_status && (
+                    <div className="mt-2.5 pt-2.5 border-t border-slate-50 space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                        <span className={`font-bold px-2.5 py-1 rounded-full border ${r.trip_status === 'finished' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : r.trip_status === 'assigned' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>📍 {describeTrip(r)}</span>
+                        {r.trip_status === 'finished' && r.finish_odometer !== undefined && <span className="text-slate-600 font-bold">العداد: <span className="font-mono">{r.finish_odometer.toLocaleString()}</span> كم</span>}
+                        {r.trip_status === 'finished' && r.expected_smoke !== undefined && <span className="text-slate-600 font-bold">الدخان المتوقع: <span className="font-mono">{r.expected_smoke.toLocaleString()}</span> ج.م</span>}
+                      </div>
+                      {(r.trip_log || []).length > 0 && (
+                        <details className="text-[11px] text-slate-500">
+                          <summary className="cursor-pointer font-bold">سجل مراحل الرحلة</summary>
+                          <ol className="mt-1.5 space-y-1">
+                            {(r.trip_log || []).map((e, i) => (
+                              <li key={i} className="flex flex-wrap gap-x-2">
+                                <span className="font-bold text-slate-600">{TRIP_STATUS_LABELS[e.status]}{typeof e.leg === 'number' && (r.destinations || []).length > 1 ? ` (وجهة ${e.leg + 1})` : ''}</span>
+                                <span className="font-mono text-slate-400">{e.at.replace('T', ' ').slice(0, 16)}</span>
+                                {e.by === 'office' && <span className="text-slate-400">أنهاها المكتب</span>}
+                              </li>
+                            ))}
+                          </ol>
+                        </details>
+                      )}
                     </div>
                   )}
                 </>

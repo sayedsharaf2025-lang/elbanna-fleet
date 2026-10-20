@@ -414,7 +414,32 @@ ALTER TABLE maintenance_requests ADD COLUMN IF NOT EXISTS km_since_last NUMERIC(
 ALTER TABLE maintenance_requests ADD COLUMN IF NOT EXISTS purchase_invoice_image TEXT;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS return_reason TEXT;
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS returned_by VARCHAR(100);
-ALTER TABLE invoices ADD COLUMN IF NOT EXISTS returned_at TIMESTAMPTZ;`;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS returned_at TIMESTAMPTZ;
+
+-- 19. رحلة السائق على طلبات النقل (تطبيق السائق + متابعة السائقين)
+ALTER TABLE transport_requests ADD COLUMN IF NOT EXISTS destinations JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE transport_requests ADD COLUMN IF NOT EXISTS execution_date DATE;
+ALTER TABLE transport_requests ADD COLUMN IF NOT EXISTS trip_status VARCHAR(30);
+ALTER TABLE transport_requests ADD COLUMN IF NOT EXISTS trip_leg INTEGER;
+ALTER TABLE transport_requests ADD COLUMN IF NOT EXISTS trip_log JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE transport_requests ADD COLUMN IF NOT EXISTS finish_odometer NUMERIC(12,0);
+ALTER TABLE transport_requests ADD COLUMN IF NOT EXISTS expected_smoke NUMERIC(12,2);
+
+-- 20. الإشعارات (طلبات النقل والصيانة) — read_by = معرّفات المستخدمين اللي قرأوا الإشعار
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  kind VARCHAR(50) NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+  entity_type VARCHAR(20) NOT NULL,
+  entity_id TEXT NOT NULL,
+  target_screens JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  created_by VARCHAR(150),
+  read_by JSONB DEFAULT '[]'::jsonb
+);
+CREATE INDEX IF NOT EXISTS notifications_created_at_idx ON notifications (created_at DESC);
+ALTER TABLE notifications DISABLE ROW LEVEL SECURITY;`;
 
   const tableSchemas = {
     cars: `CREATE TABLE IF NOT EXISTS cars (

@@ -16,6 +16,8 @@ import { MaintenanceRequest, MaintenanceRequestStatus } from '../types';
 import { findPreviousFault, kmSinceLastFault } from '../db/logic/maintenanceFlow';
 import { A5PrintPreview } from './A5PrintPreview';
 import { ErrorBoundary } from './ErrorBoundary';
+import { useNavFocus } from '../hooks/useNavFocus';
+import { MAINTENANCE_MODE_SCREEN } from '../db/logic/notifications';
 import {
   Wrench, Search, Plus, Truck, User, Calendar, ClipboardList, Save, Trash2, FileText, Receipt,
   CheckCircle, ArrowLeft, Package, Building2, Printer, Camera, Gauge, X,
@@ -158,6 +160,15 @@ export function MaintenanceTab({ mode = 'requests' }: { mode?: MaintenanceMode }
       .sort((a, b) => b.request_number.localeCompare(a.request_number));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db.maintenanceRequests, db.cars, searchTerm, sectionKey, mode]);
+
+  // فتح تفاصيل الطلب مباشرة لما المستخدم يضغط على إشعار
+  useNavFocus(MAINTENANCE_MODE_SCREEN[mode] || 'maintenance_requests', (nav) => {
+    if (nav.entityType !== 'maintenance') return;
+    const target = db.maintenanceRequests.find(r => r.id === nav.entityId);
+    if (!target) { showToast('الطلب ده مش موجود (اتحذف أو لسه ماوصلش للجهاز ده).'); return; }
+    setActiveRequestId(target.id);
+    setView('detail');
+  });
 
   const openDetail = (id: string) => { setActiveRequestId(id); setView('detail'); };
   const backToList = () => { setView('list'); setActiveRequestId(null); };

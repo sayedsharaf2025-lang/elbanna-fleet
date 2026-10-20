@@ -247,6 +247,26 @@ export interface TransportRequest {
   responded_at?: string; // وقت الرد بالسيارة
   delivered_at?: string; // وقت انتهاء التوصيل
   created_by?: string; // اسم المستخدم الذي سجل الطلب
+  // ====== رحلة السائق (بتتحدث من تطبيق السائق) ======
+  trip_status?: TripStatus; // مرحلة الرحلة الحالية — بتبدأ بـ assigned أول ما يتم الرد بسيارة
+  trip_leg?: number; // رقم الوجهة الحالية (يبدأ من 0) داخل destinations
+  trip_log?: TripEvent[]; // سجل المراحل بأوقاتها
+  finish_odometer?: number; // عداد السيارة عند الانتهاء (كم)
+  expected_smoke?: number; // الدخان المتوقع اللي كتبه السائق عند الانتهاء
+}
+
+// مراحل رحلة السائق:
+//  assigned: تم الرد بسيارة وبانتظار قبول السائق → accepted: قبل وفي الطريق للتحميل
+//  → at_pickup: وصل مكان التحميل → loaded: استلم الحمولة وفي الطريق للوجهة
+//  → at_destination: وصل الوجهة (لو فيه وجهة تانية يتوجه لها وترجع loaded)
+//  → heading_garage: في الطريق للجراج → finished: تم الانتهاء (العداد + الدخان المتوقع)
+export type TripStatus = 'assigned' | 'accepted' | 'at_pickup' | 'loaded' | 'at_destination' | 'heading_garage' | 'finished';
+
+export interface TripEvent {
+  status: TripStatus;
+  at: string; // ISO
+  leg?: number; // رقم الوجهة وقت الحدث (للمراحل loaded/at_destination)
+  by?: string; // 'office' لو المكتب هو اللي أنهى الرحلة يدويًا
 }
 
 export interface DriverAccountMovement {
@@ -332,4 +352,23 @@ export interface MaintenanceInvoice {
   status: 'draft' | 'approved' | 'paid'; // تحت المراجعة / معتمدة / مصروفة
   invoice_date: string;
   created_by?: string;
+}
+
+
+// ====== الإشعارات ======
+// إشعار واحد لكل حدث على طلب (نقل أو صيانة). بيظهر لكل مستخدم عنده صلاحية على أي شاشة من target_screens،
+// وحالة القراءة لكل مستخدم لوحده (read_by = معرّفات المستخدمين اللي قرأوه).
+export type NotificationEntity = 'transport' | 'maintenance';
+
+export interface AppNotification {
+  id: string;
+  kind: string; // نوع الحدث (مثلاً maintenance_new / transport_created)
+  title: string;
+  body: string;
+  entity_type: NotificationEntity;
+  entity_id: string; // معرّف طلب النقل أو الصيانة
+  target_screens: string[]; // الشاشات المعنية بالإشعار بالترتيب (أول شاشة متاحة للمستخدم هي اللي بتتفتح)
+  created_at: string; // ISO
+  created_by?: string;
+  read_by: string[];
 }

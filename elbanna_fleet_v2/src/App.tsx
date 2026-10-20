@@ -22,6 +22,7 @@ import { TransportCostSettingsTab } from './components/TransportCostSettingsTab'
 import { RouteAccountingTab } from './components/RouteAccountingTab';
 import { CarDailyCostsTab } from './components/CarDailyCostsTab';
 import { MaintenanceTab } from './components/MaintenanceTab';
+import { NotificationBell } from './components/NotificationBell';
 import { VehicleProfitabilityTab } from './components/VehicleProfitabilityTab';
 import { LicenseApprovalsTab } from './components/LicenseApprovalsTab';
 import { CarMonthlyCostsTab } from './components/CarMonthlyCostsTab';
@@ -288,6 +289,7 @@ function DashboardLayout() {
           </div>
 
           <div className="flex items-center gap-4">
+            <NotificationBell onNavigate={(screen) => { setActiveTab(screen as any); setIsSidebarOpen(false); }} />
             {/* مؤشر حالة المزامنة مع السحابة */}
             <div
               className={`flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border ${db.cloudError ? 'bg-rose-950 text-rose-300 border-rose-500/30' : db.isCloudConnected ? 'bg-emerald-950 text-emerald-300 border-emerald-500/30' : 'bg-slate-950 text-slate-400 border-slate-800'}`}

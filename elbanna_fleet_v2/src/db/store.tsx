@@ -17,6 +17,7 @@ import {
   CustodyMovement,
   User,
   TransportRequest,
+  AppNotification,
   CostItemType,
   RoutePriceEntry,
   TransportRequestCost,
@@ -47,6 +48,11 @@ import { normalizeDateToYmd } from './dates';
 import { generateId } from './ids';
 import { maintenanceCostForCarDay } from './logic/maintenanceCost';
 import { normalizeMaintenanceRequest } from './logic/maintenanceFlow';
+import {
+  NotificationDraft, maintenanceNotification, transportNotification, notificationUserKey, isVisibleTo, resolveTargetScreen, isUnread,
+  normalizeNotification, mergeNotifications, pruneNotifications, notificationsToUpload,
+} from './logic/notifications';
+import { normalizeTransportRequest, startTripPatch, advanceTrip, closeTripByOfficePatch, TripAction, TripPayload } from './logic/tripFlow';
 import { loadSavedArray, loadSavedObject, cleanupMockData } from './storage';
 import type { DbContextType } from './storeTypes';
 import { DEFAULT_ROLE_PERMISSIONS, mergeNewDefaultScreens } from './permissions';
@@ -557,8 +563,115 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   const [transportRequests, setTransportRequests] = useState<TransportRequest[]>(() =>
-    loadSavedArray('elbanna_transport_requests', [])
+    loadSavedArray<TransportRequest>('elbanna_transport_requests', []).map(r => normalizeTransportRequest(r))
   );
+
+  // ====== الإشعارات ======
+  // كل حدث على طلب نقل/صيانة بيعمل إشعار، بيظهر لكل مستخدم عنده صلاحية على الشاشة المعنية، وبالضغط عليه
+  // بيفتح تفاصيل الطلب في الشاشة دي (pendingNav). حالة القراءة لكل مستخدم لوحده (read_by).
+  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
+    pruneNotifications(loadSavedArray<any>('elbanna_notifications', []).map(normalizeNotification), Date.now())
+  );
+  const [pendingNav, setPendingNav] = useState<{ screen: string; entityType: 'transport' | 'maintenance'; entityId: string; nonce: number } | null>(null);
+  useEffect(() => {
+    try { localStorage.setItem('elbanna_notifications', JSON.stringify(notifications)); } catch { /* التخزين ممتلئ — مش مشكلة */ }
+  }, [notifications]);
+
+  const notificationScreens = (): string[] => {
+    const user = currentUser;
+    if (!user) return [];
+    const live = systemUsers.find(u => u.id === user.systemUserId);
+    return live ? live.allowed_screens : (user.allowedScreens || []);
+  };
+  const notificationKey = notificationUserKey(currentUser);
+  const myNotifications = notifications.filter(n => isVisibleTo(n, notificationScreens()));
+  const unreadNotificationCount = myNotifications.filter(n => isUnread(n, notificationKey)).length;
+
+  const notifyEvent = (draft: NotificationDraft | null) => {
+    if (!draft) return;
+    const n: AppNotification = {
+      ...draft,
+      id: generateId('nt'),
+      created_at: new Date().toISOString(),
+      created_by: currentUser?.name || currentUser?.username,
+      // اللي عمل الحدث نفسه مايتحسبش عنده غير مقروء
+      read_by: notificationKey ? [notificationKey] : [],
+    };
+    setNotifications(prev => pruneNotifications([n, ...prev], Date.now()));
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      supabase.from('notifications').upsert([n]).then(({ error }: any) => {
+        if (error) console.warn('Supabase notification upsert error:', error.message);
+      });
+    }
+  };
+
+  const markNotificationsRead = (ids: string[]) => {
+    const key = notificationKey;
+    if (!key || ids.length === 0) return;
+    const changed = notifications
+      .filter(n => ids.includes(n.id) && !n.read_by.includes(key))
+      .map(n => ({ ...n, read_by: [...n.read_by, key] }));
+    if (changed.length === 0) return;
+    const byId = new Map(changed.map(n => [n.id, n]));
+    setNotifications(prev => prev.map(n => {
+      const c = byId.get(n.id);
+      return c ? { ...n, read_by: Array.from(new Set([...n.read_by, key])) } : n;
+    }));
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      supabase.from('notifications').upsert(changed).then(({ error }: any) => {
+        if (error) console.warn('Supabase notification read upsert error:', error.message);
+      });
+    }
+  };
+  const markAllNotificationsRead = () => markNotificationsRead(myNotifications.filter(n => isUnread(n, notificationKey)).map(n => n.id));
+
+  // فتح إشعار: تعليمه كمقروء وتحديد الشاشة اللي هتتفتح (أول شاشة معنية متاحة للمستخدم)
+  const openNotification = (n: AppNotification): string | null => {
+    const screen = resolveTargetScreen(n, notificationScreens());
+    markNotificationsRead([n.id]);
+    if (!screen) return null;
+    setPendingNav({ screen, entityType: n.entity_type, entityId: n.entity_id, nonce: Date.now() });
+    return screen;
+  };
+  const consumeNav = (nonce: number) => setPendingNav(prev => (prev && prev.nonce === nonce ? null : prev));
+
+  // مزامنة الإشعارات مع السحابة كل 15 ثانية وعند رجوع الشاشة للواجهة (لو الجدول لسه ماتنشأش بيفضل محلي بس)
+  const notificationsRef = useRef(notifications);
+  notificationsRef.current = notifications;
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client) return;
+    let busy = false;
+    const sync = async () => {
+      if (busy || isDownloadingRef.current || document.visibilityState === 'hidden') return;
+      busy = true;
+      try {
+        const since = new Date(Date.now() - 30 * 86400000).toISOString();
+        const { data, error } = await client.from('notifications').select('*').gte('created_at', since).order('created_at', { ascending: false }).limit(300);
+        if (error || !data) return;
+        const cloud = (data as any[]).map(normalizeNotification);
+        const local = notificationsRef.current;
+        const merged = pruneNotifications(mergeNotifications(local, cloud), Date.now());
+        const up = notificationsToUpload(merged, cloud);
+        if (up.length > 0) {
+          const { error: upErr } = await client.from('notifications').upsert(up);
+          if (upErr) console.warn('Supabase notifications upload error:', upErr.message);
+        }
+        if (JSON.stringify(merged) !== JSON.stringify(local)) setNotifications(merged);
+      } catch (e) {
+        console.warn('notifications sync failed', e);
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = setInterval(sync, 15000);
+    const onVisible = () => { if (document.visibilityState === 'visible') sync(); };
+    document.addEventListener('visibilitychange', onVisible);
+    sync();
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, []);
 
   // ====== قسم الصيانة — مبني فوق قاعدة بيانات السيارات الحالية (car_id = Car.id)، بدون أي تكرار لبياناتها ======
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>(() => {
@@ -1307,7 +1420,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     setMovements(list(data.driverMovements));
     setCustodyAccounts(list(data.custodyAccounts));
     setCustodyMovements(list(data.custodyMovements));
-    setTransportRequests(list(data.transportRequests));
+    setTransportRequests(list(data.transportRequests).map((r: any) => normalizeTransportRequest(r)));
     persistCarDailyCosts(list(data.carDailyCosts));
     persistCarMonthlyCosts(list(data.carMonthlyCosts));
     if (Array.isArray(data.fuelLogs)) persistRows('fuel_logs', 'elbanna_fuel_logs', costTablesRef.current.fuel, fuelLogs, data.fuelLogs, setFuelLogs);
@@ -1870,7 +1983,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const cloudRequests = resTransportRequests.data;
         const cloudIds = new Set(cloudRequests.map((r: any) => r.id));
         const localOnly = notDeleted('transport_requests', transportRequests).filter(r => !cloudIds.has(r.id));
-        setTransportRequests([...cloudRequests, ...localOnly]);
+        setTransportRequests([...cloudRequests, ...localOnly].map((r: any) => normalizeTransportRequest(r)));
       }
       if (resMaintenanceRequests.data) {
         const cloudReqs = resMaintenanceRequests.data;
@@ -2490,7 +2603,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       // رفع طلبات النقل بشكل منفصل ومتسامح: لو الجدول غير منشأ بعد على مشروع قديم، منمنعش باقي المزامنة
       if (sanitizedTransportRequests.length > 0) {
         try {
-          const { error } = await supabase.from('transport_requests').upsert(sanitizedTransportRequests);
+          const { error } = await upsertTransportRows(supabase, sanitizedTransportRequests);
           if (error && !error.message?.includes("does not exist") && !error.message?.includes("schema cache")) {
             console.warn("Supabase upload transport_requests error:", error);
           }
@@ -2648,10 +2761,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           return { ...r, request_number: next };
         });
         if (localOnly.length > 0) {
-          const { error: upErr } = await client.from('transport_requests').upsert(localOnly as any[]);
+          const { error: upErr } = await upsertTransportRows(client, localOnly as any[]);
           if (upErr) setCloudError(`تعذر رفع الطلبات للسحابة: ${upErr.message}`);
         }
-        const merged = [...cloudRows, ...localOnly];
+        const merged = [...cloudRows, ...localOnly].map((r: any) => normalizeTransportRequest(r));
         const sameShape = JSON.stringify([...merged].sort((a: any, b: any) => a.id.localeCompare(b.id))) ===
           JSON.stringify([...transportRequestsRef.current].sort((a: any, b: any) => a.id.localeCompare(b.id)));
         if (!sameShape) setTransportRequests(merged as any);
@@ -2740,6 +2853,20 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     return `${prefix}-${nextSeq}`;
   };
 
+  // أعمدة رحلة السائق — لو لسه ماتضافتش في Supabase منوقفش باقي الحفظ، بنبعت من غيرها وننبّه المستخدم
+  const TRIP_COLS = ['trip_status', 'trip_leg', 'trip_log', 'finish_odometer', 'expected_smoke'];
+  const tripColsHint = 'أعمدة رحلة السائق مش موجودة في قاعدة البيانات السحابية. شغّل سكريبت transport-trip.sql (أو انسخ مخطط الجداول من شاشة الاتصال السحابي) مرة واحدة في Supabase SQL Editor عشان حالة الرحلة توصل لتطبيق السائق وباقي الأجهزة.';
+  const mentionsTripCol = (msg?: string) => TRIP_COLS.some(c => new RegExp(c).test(msg || ''));
+  const stripTripCols = (row: any) => { const out = { ...row }; TRIP_COLS.forEach(c => delete out[c]); return out; };
+  const upsertTransportRows = async (client: any, rows: any[]) => {
+    let res = await client.from('transport_requests').upsert(rows);
+    if (res.error && mentionsTripCol(res.error.message)) {
+      setCloudError(tripColsHint);
+      res = await client.from('transport_requests').upsert(rows.map(stripTripCols));
+    }
+    return res;
+  };
+
   const addTransportRequest = (data: {
     requester_name: string;
     farm_name: string;
@@ -2762,12 +2889,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       created_by: currentUser?.name || currentUser?.username
     };
     setTransportRequests(prev => [...prev, newRequest]);
+    notifyEvent(transportNotification('created', newRequest));
     addFarmIfNew(newRequest.farm_name);
     newRequest.destinations.forEach(d => addFarmIfNew(d));
 
     const supabase = getSupabaseClient();
     if (supabase) {
-      supabase.from('transport_requests').upsert([newRequest]).then(({ error }) => {
+      upsertTransportRows(supabase, [newRequest]).then(({ error }) => {
         if (error) { console.error("Supabase insert transport_request error:", error); setCloudError(`تعذر رفع الطلب للسحابة: ${error.message}`); }
       });
     }
@@ -2779,9 +2907,20 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const supabase = getSupabaseClient();
     if (supabase) {
-      supabase.from('transport_requests').update(updatedFields).eq('id', id).then(({ error }) => {
-        if (error) { console.error("Supabase update transport_request error:", error); setCloudError(`تعذر تحديث الطلب في السحابة: ${error.message}`); }
-      });
+      const send = (payload: any, stripped: boolean) => {
+        supabase.from('transport_requests').update(payload).eq('id', id).then(({ error }) => {
+          if (!error) return;
+          if (!stripped && mentionsTripCol(error.message)) {
+            setCloudError(tripColsHint);
+            const rest = stripTripCols(payload);
+            if (Object.keys(rest).length > 0) send(rest, true);
+            return;
+          }
+          console.error("Supabase update transport_request error:", error);
+          setCloudError(`تعذر تحديث الطلب في السحابة: ${error.message}`);
+        });
+      };
+      send(updatedFields, false);
     }
   };
 
@@ -2850,6 +2989,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       stage_history: [{ status: 'new', at: new Date().toISOString(), by: currentUser?.name || currentUser?.username, kind: 'create' }],
     };
     setMaintenanceRequests(prev => [...prev, newRequest]);
+    notifyEvent(maintenanceNotification('new', newRequest, cars.find(c => c.id === newRequest.car_id)?.car_number || ''));
 
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
@@ -2890,6 +3030,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       patch = { ...fields, stage_history: [...(existing.stage_history || []), entry] };
     }
     setMaintenanceRequests(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+    if (existing && fields.status && fields.status !== existing.status) {
+      notifyEvent(maintenanceNotification(fields.status, { ...existing, ...patch }, cars.find(c => c.id === existing.car_id)?.car_number || ''));
+    }
 
     const supabase = getSupabaseClient();
     if (supabase && isCloudConnected) {
@@ -3021,10 +3164,12 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       status: 'in_progress',
       assigned_car_id: car.id,
       assigned_driver_id: car.driver_id || undefined,
-      responded_at: new Date().toISOString()
+      responded_at: new Date().toISOString(),
+      ...startTripPatch(new Date().toISOString())
     };
 
     updateTransportRequest(requestId, updatedFields);
+    notifyEvent(transportNotification('responded', request, car.car_number));
     return { success: true };
   };
 
@@ -3035,8 +3180,26 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     updateTransportRequest(requestId, {
       status: 'done',
       delivered_at: new Date().toISOString(),
-      execution_date: executionDate ? normalizeDateToYmd(executionDate) : (request?.execution_date || normalizeDateToYmd(new Date().toISOString()))
+      execution_date: executionDate ? normalizeDateToYmd(executionDate) : (request?.execution_date || normalizeDateToYmd(new Date().toISOString())),
+      ...(request ? closeTripByOfficePatch(request, new Date().toISOString()) : {})
     });
+    if (request && request.status !== 'done') {
+      notifyEvent(transportNotification('delivered', request, cars.find(c => c.id === request.assigned_car_id)?.car_number));
+    }
+  };
+
+  // تنفيذ خطوة من رحلة السائق (قبول / وصول / استلام / ... / انتهاء بالعداد والدخان المتوقع)
+  const advanceTransportTrip = (requestId: string, action: TripAction, payload?: TripPayload): { success: boolean; error?: string } => {
+    const request = transportRequests.find(r => r.id === requestId);
+    if (!request) return { success: false, error: 'الطلب غير موجود' };
+    const nowIso = new Date().toISOString();
+    const res = advanceTrip(request, action, nowIso, normalizeDateToYmd(nowIso), payload);
+    if (!res.ok || !res.patch) return { success: false, error: res.error || 'تعذر تنفيذ الخطوة' };
+    updateTransportRequest(requestId, res.patch);
+    if (action === 'accept' || action === 'finish') {
+      notifyEvent(transportNotification(action === 'accept' ? 'trip_accepted' : 'trip_finished', request, cars.find(c => c.id === request.assigned_car_id)?.car_number));
+    }
+    return { success: true };
   };
 
   // Drivers action definitions
@@ -5082,6 +5245,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         farms: farms || [],
         addTransportRequest,
         updateTransportRequest,
+        advanceTransportTrip,
         deleteTransportRequest,
         respondTransportRequestWithCar,
         markTransportRequestDelivered,
@@ -5203,6 +5367,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         login,
         loginAuto,
         hasScreenPermission,
+        notifications: myNotifications,
+        unreadNotificationCount,
+        markNotificationsRead,
+        markAllNotificationsRead,
+        openNotification,
+        pendingNav,
+        consumeNav,
         logout,
         adminPassword,
         managerPassword,
