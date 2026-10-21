@@ -2,10 +2,6 @@ name: Build Android APK (طلبات النقل البنا)
 on:
   push:
     branches: [main, master]
-    paths:
-      - 'src/**'
-      - 'capacitor.config.ts'
-      - 'package.json'
   workflow_dispatch:
 
 jobs:

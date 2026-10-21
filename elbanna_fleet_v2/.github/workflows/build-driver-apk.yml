@@ -1,11 +1,8 @@
-name: Build Driver Android APK
+name: Build Driver APK
+
 on:
   push:
     branches: [main, master]
-    paths:
-      - 'src/**'
-      - 'capacitor.driver.config.ts'
-      - 'package.json'
   workflow_dispatch:
 
 jobs:
@@ -13,37 +10,52 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: 'elbanna_fleet_v2/package-lock.json'
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
+
       - name: Install dependencies
         working-directory: ./elbanna_fleet_v2
         run: npm install --no-audit --no-fund
-      - name: Swap to Driver Config
+
+      - name: Use driver Capacitor config
         working-directory: ./elbanna_fleet_v2
         run: cp capacitor.driver.config.ts capacitor.config.ts
-      - name: Build Driver App
+
+      - name: Build web app (driver mode)
         working-directory: ./elbanna_fleet_v2
-        run: npm run build:driver
+        run: npx vite build --mode driver
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
+
       - name: Add Android platform
         working-directory: ./elbanna_fleet_v2
         run: |
           npx cap add android
+          sed -i 's#<application#<uses-permission android:name="android.permission.VIBRATE" />\n    <application#' android/app/src/main/AndroidManifest.xml
           npx cap sync android
+
       - name: Build debug APK
         working-directory: ./elbanna_fleet_v2/android
         run: ./gradlew assembleDebug --no-daemon
+
+      - name: Name the APK
+        working-directory: ./elbanna_fleet_v2
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk out/elbanna-driver.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: elbanna-driver-apk
-          path: elbanna_fleet_v2/android/app/build/outputs/apk/debug/app-debug.apk
+          path: elbanna_fleet_v2/out/elbanna-driver.apk
