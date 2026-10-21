@@ -12,7 +12,7 @@ export default defineConfig(() => {
       },
     },
     build: {
-      minify: false // إيقاف ضغط الكود لمنع خطأ Zt نهائياً
+      minify: false // إيقاف ضغط الكود نهائياً
     },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
