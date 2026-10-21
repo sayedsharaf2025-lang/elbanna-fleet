@@ -12,14 +12,7 @@ export default defineConfig(() => {
       },
     },
     build: {
-      minify: process.env.NO_MINIFY === '1' ? false : 'esbuild',
-      rollupOptions: {
-        output: {
-          manualChunks(id: string) {
-            if (id.includes('node_modules')) return 'vendor';
-          },
-        },
-      },
+      minify: false // إيقاف ضغط الكود لمنع خطأ Zt نهائياً
     },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
