@@ -25,6 +25,10 @@ jobs:
         working-directory: ./elbanna_fleet_v2
         run: npm install --no-audit --no-fund
 
+      - name: Change App ID for Driver
+        working-directory: ./elbanna_fleet_v2
+        run: sed -i "s/appId: 'com.elbanna.requests'/appId: 'com.elbanna.driver'/" capacitor.config.ts
+
       - name: Build Driver App
         working-directory: ./elbanna_fleet_v2
         run: npm run build:driver
