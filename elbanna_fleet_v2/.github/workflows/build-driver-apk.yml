@@ -1,0 +1,53 @@
+name: Build Driver Android APK
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'capacitor.config.ts'
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: 'elbanna_fleet_v2/package-lock.json'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        working-directory: ./elbanna_fleet_v2
+        run: npm install --no-audit --no-fund
+
+      - name: Build Driver App
+        working-directory: ./elbanna_fleet_v2
+        run: npm run build:driver
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
+
+      - name: Add Android platform
+        working-directory: ./elbanna_fleet_v2
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Build debug APK
+        working-directory: ./elbanna_fleet_v2/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: elbanna-driver-apk
+          path: elbanna_fleet_v2/android/app/build/outputs/apk/debug/app-debug.apk
