@@ -25,6 +25,7 @@ const ALL_SCREENS: { id: string; label: string }[] = [
   { id: 'transport_cost_settings', label: 'إعدادات تكلفة خطوط السير' },
   { id: 'violations', label: 'تسجيل المخالفات وتفادي التكرار' },
   { id: 'requests_tracking', label: 'متابعة الطلبات' },
+  { id: 'driver_tracking', label: 'متابعة السائقين' },
   { id: 'license_tracking', label: 'متابعة وتحديث التراخيص المتقدمة' },
   { id: 'custody_licensing', label: 'فواتير تراخيص' },
   { id: 'deductions', label: 'الخصومات الفردية والجماعية' },

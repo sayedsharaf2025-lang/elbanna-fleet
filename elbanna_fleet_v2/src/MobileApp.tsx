@@ -22,6 +22,7 @@ import { RouteAccountingTab } from './components/RouteAccountingTab';
 import { CarDailyCostsTab } from './components/CarDailyCostsTab';
 import { MaintenanceTab } from './components/MaintenanceTab';
 import { NotificationBell } from './components/NotificationBell';
+import { DriverTrackingTab } from './components/DriverTrackingTab';
 import { VehicleProfitabilityTab } from './components/VehicleProfitabilityTab';
 import { LicenseApprovalsTab } from './components/LicenseApprovalsTab';
 import { CarMonthlyCostsTab } from './components/CarMonthlyCostsTab';
@@ -31,7 +32,7 @@ import { ServicePlansTab } from './components/ServicePlansTab';
 import {
   Send, ClipboardList, LogOut, Receipt, CalendarCheck, Menu, X, LayoutDashboard, Truck, AlertTriangle,
   FileSpreadsheet, CreditCard, FileText, Users, Fuel, Route, Gauge, Wrench, Package, FileCheck, Wallet,
-  BarChart3, TrendingUp,
+  BarChart3, TrendingUp, MapPin,
 } from 'lucide-react';
 
 // كل شاشات الموقع — نفس ids الصلاحيات؛ بتظهر للمستخدم اللي صلاحياته تسمح بيها بس
@@ -42,6 +43,7 @@ const MOBILE_GROUPS: { label: string; items: { id: string; label: string; icon: 
   { label: 'العمليات / حركة الأسطول', items: [
     { id: 'transport_requests', label: 'طلبات النقل', icon: Send, render: () => <TransportRequestsTab /> },
     { id: 'requests_tracking', label: 'متابعة الطلبات', icon: ClipboardList, render: () => <RequestsTrackingTab /> },
+    { id: 'driver_tracking', label: 'متابعة السائقين', icon: MapPin, render: () => <DriverTrackingTab /> },
     { id: 'license_tracking', label: 'متابعة وتحديث التراخيص', icon: CalendarCheck, render: () => <LicenseDashboardTab /> },
     { id: 'violations', label: 'تسجيل المخالفات', icon: AlertTriangle, render: () => <ViolationsTab /> },
   ] },

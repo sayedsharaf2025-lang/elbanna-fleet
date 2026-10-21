@@ -577,6 +577,16 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     try { localStorage.setItem('elbanna_notifications', JSON.stringify(notifications)); } catch { /* التخزين ممتلئ — مش مشكلة */ }
   }, [notifications]);
 
+  const notificationScreens = (): string[] => {
+    const user = currentUser;
+    if (!user) return [];
+    const live = systemUsers.find(u => u.id === user.systemUserId);
+    return live ? live.allowed_screens : (user.allowedScreens || []);
+  };
+  const notificationKey = notificationUserKey(currentUser);
+  const myNotifications = notifications.filter(n => isVisibleTo(n, notificationScreens()));
+  const unreadNotificationCount = myNotifications.filter(n => isUnread(n, notificationKey)).length;
+
   const notifyEvent = (draft: NotificationDraft | null) => {
     if (!draft) return;
     const n: AppNotification = {
@@ -772,18 +782,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const systemUsersPersistedRef = useRef<boolean>(loadSavedArray<SystemUser>('elbanna_system_users', []).length > 0);
   const systemUsersQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const [systemUsersSyncError, setSystemUsersSyncError] = useState<string | null>(null);
-
-  // مشتقات الإشعارات: لازم تتحسب بعد تعريف systemUsers (وإلا ReferenceError وقت الرسم)
-  const notificationScreens = (): string[] => {
-    const user = currentUser;
-    if (!user) return [];
-    const live = systemUsers.find(u => u.id === user.systemUserId);
-    return live ? live.allowed_screens : (user.allowedScreens || []);
-  };
-  const notificationKey = notificationUserKey(currentUser);
-  const myNotifications = notifications.filter(n => isVisibleTo(n, notificationScreens()));
-  const unreadNotificationCount = myNotifications.filter(n => isUnread(n, notificationKey)).length;
-
 
   type SystemUsersMutation<T> = { error: string } | { next: SystemUser[]; value?: T };
 

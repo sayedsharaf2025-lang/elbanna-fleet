@@ -6,10 +6,10 @@
 // خريطة الصلاحيات الافتراضية للشاشات لكل رتبة — نفس القيم اللي كانت متثبتة (hardcoded) قبل كده
 // في App.tsx، وبقت دلوقتي قابلة للتعديل من شاشة "خريطة صلاحيات الشاشات"
 export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings', 'transport_cost_settings', 'route_accounting', 'car_daily_costs', 'maintenance_requests', 'maintenance_parts', 'maintenance_review', 'maintenance_accounting', 'license_invoice_approvals', 'car_monthly_costs', 'driver_reports', 'fuel_logs', 'service_plans', 'vehicle_profitability'],
+  admin: ['dashboard', 'transport_requests', 'fleet', 'violations', 'requests_tracking', 'license_tracking', 'custody_licensing', 'deductions', 'cross_accounts', 'reports', 'users_settings', 'transport_cost_settings', 'route_accounting', 'car_daily_costs', 'maintenance_requests', 'maintenance_parts', 'maintenance_review', 'maintenance_accounting', 'license_invoice_approvals', 'car_monthly_costs', 'driver_reports', 'fuel_logs', 'service_plans', 'vehicle_profitability', 'driver_tracking'],
   supervisor: ['custody_licensing', 'license_tracking', 'reports'],
   manager: ['reports', 'route_accounting', 'car_daily_costs', 'car_monthly_costs', 'driver_reports', 'fuel_logs', 'service_plans', 'vehicle_profitability'],
-  movement_supervisor: ['requests_tracking'],
+  movement_supervisor: ['requests_tracking', 'driver_tracking'],
   requests_agent: ['transport_requests'],
 };
 

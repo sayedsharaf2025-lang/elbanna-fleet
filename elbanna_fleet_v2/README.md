@@ -145,3 +145,11 @@ git push -u origin main
 - يتبني تلقائيًا من GitHub Actions (`.github/workflows/build-apk.yml`) عند كل push على main، أو يدويًا من تبويب Actions → Run workflow.
 - النتيجة: Artifact اسمه `elbanna-requests-apk` فيه `app-debug.apk`.
 - التطبيق = `src/MobileApp.tsx` (طلب جديد + متابعة الطلبات) ويتفعّل بـ `VITE_APP_MODE=requests`.
+
+## تطبيق السائق (المرحلة 4)
+
+- الكود في `src/driver/` — تطبيق منفصل خفيف (بيتحمّل لوحده، مابيحمّلش كود المكتب ولا بيانات الشركة) ومتصل بنفس قاعدة Supabase.
+- يتفتح بأي من: رابط `/driver` على نفس الموقع، أو `?app=driver`، أو بناء مستقل `npm run build:driver` (`VITE_APP_MODE=driver` من `.env.driver`) وتشغيل محلي `npm run dev:driver`.
+- الدخول: كود السائق + رقم سري يحدده المكتب من شاشة «متابعة السائقين» ← «دخول تطبيق السائق» (مخزّن مشفّر في جدول `driver_app_access`).
+- سكريبتات قاعدة البيانات المطلوبة مرة واحدة: `sql/transport-trip.sql` و`sql/notifications.sql` و`sql/driver-app.sql` (كلها كمان داخل مخطط الجداول في شاشة الاتصال السحابي).
+- الإشعارات للسائق جوه التطبيق (تحديث كل 10 ثواني + بانر وصوت واهتزاز، وإشعار المتصفح لو الصفحة في الخلفية). إشعار حقيقي برّه التطبيق (FCM) مرحلة لاحقة.

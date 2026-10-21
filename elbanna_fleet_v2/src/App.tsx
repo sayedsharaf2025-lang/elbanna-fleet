@@ -23,6 +23,7 @@ import { RouteAccountingTab } from './components/RouteAccountingTab';
 import { CarDailyCostsTab } from './components/CarDailyCostsTab';
 import { MaintenanceTab } from './components/MaintenanceTab';
 import { NotificationBell } from './components/NotificationBell';
+import { DriverTrackingTab } from './components/DriverTrackingTab';
 import { VehicleProfitabilityTab } from './components/VehicleProfitabilityTab';
 import { LicenseApprovalsTab } from './components/LicenseApprovalsTab';
 import { CarMonthlyCostsTab } from './components/CarMonthlyCostsTab';
@@ -61,7 +62,8 @@ import {
   Wallet,
   BarChart3,
   ChevronDown,
-  TrendingUp
+  TrendingUp,
+  MapPin
 } from 'lucide-react';
 
 function DashboardLayout() {
@@ -79,7 +81,7 @@ function DashboardLayout() {
     return user.allowedScreens || [];
   }, [db.currentUser, db.systemUsers]);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance_requests' | 'maintenance_parts' | 'maintenance_review' | 'maintenance_accounting' | 'license_invoice_approvals' | 'car_monthly_costs' | 'driver_reports' | 'fuel_logs' | 'service_plans' | 'vehicle_profitability'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transport_requests' | 'fleet' | 'violations' | 'requests_tracking' | 'deductions' | 'custody_licensing' | 'cross_accounts' | 'license_tracking' | 'reports' | 'users_settings' | 'transport_cost_settings' | 'route_accounting' | 'car_daily_costs' | 'maintenance_requests' | 'maintenance_parts' | 'maintenance_review' | 'maintenance_accounting' | 'license_invoice_approvals' | 'car_monthly_costs' | 'driver_reports' | 'fuel_logs' | 'service_plans' | 'vehicle_profitability' | 'driver_tracking'>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   // المجموعة المفتوحة حاليًا في القايمة الجانبية (واحدة بس مفتوحة في كل مرة)
   const [openGroup, setOpenGroup] = useState<string | null>(null);
@@ -163,6 +165,7 @@ function DashboardLayout() {
       items: [
         { id: 'transport_requests' as const, label: 'طلبات النقل', icon: Send },
         { id: 'requests_tracking' as const, label: 'متابعة الطلبات', icon: ClipboardList },
+        { id: 'driver_tracking' as const, label: 'متابعة السائقين', icon: MapPin },
         { id: 'license_tracking' as const, label: 'متابعة وتحديث التراخيص المتقدمة', icon: CalendarCheck },
         { id: 'violations' as const, label: 'تسجيل المخالفات وتفادي التكرار', icon: AlertTriangle },
       ]
@@ -517,6 +520,7 @@ function DashboardLayout() {
             {activeTab === 'fleet' && <CarsDriversTab />}
             {activeTab === 'violations' && <ViolationsTab />}
             {activeTab === 'requests_tracking' && <RequestsTrackingTab />}
+            {activeTab === 'driver_tracking' && <DriverTrackingTab />}
             {activeTab === 'deductions' && <DeductionsTab />}
             {activeTab === 'custody_licensing' && <InvoicesTab />}
             {activeTab === 'cross_accounts' && <AccountsTab />}

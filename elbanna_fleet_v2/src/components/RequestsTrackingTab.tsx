@@ -8,6 +8,7 @@ import { useNavFocus } from '../hooks/useNavFocus';
 import { useDb } from '../db/store';
 import { TransportRequest } from '../types';
 import { describeTrip, TRIP_STATUS_LABELS } from '../db/logic/tripFlow';
+import { formatLocalDateTime } from '../db/logic/driverTracking';
 import {
   ClipboardList,
   Truck,
@@ -371,7 +372,7 @@ export function RequestsTrackingTab() {
                             {(r.trip_log || []).map((e, i) => (
                               <li key={i} className="flex flex-wrap gap-x-2">
                                 <span className="font-bold text-slate-600">{TRIP_STATUS_LABELS[e.status]}{typeof e.leg === 'number' && (r.destinations || []).length > 1 ? ` (وجهة ${e.leg + 1})` : ''}</span>
-                                <span className="font-mono text-slate-400">{e.at.replace('T', ' ').slice(0, 16)}</span>
+                                <span className="font-mono text-slate-400">{formatLocalDateTime(e.at)}</span>
                                 {e.by === 'office' && <span className="text-slate-400">أنهاها المكتب</span>}
                               </li>
                             ))}

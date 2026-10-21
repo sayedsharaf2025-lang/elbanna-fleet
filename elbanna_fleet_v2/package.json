@@ -10,7 +10,9 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "build:apk": "vite build --mode requests && cap sync android"
+    "build:apk": "vite build --mode requests && cap sync android",
+    "dev:driver": "vite --port=3001 --host=0.0.0.0 --mode driver",
+    "build:driver": "vite build --mode driver"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

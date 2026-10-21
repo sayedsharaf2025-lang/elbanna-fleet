@@ -1,7 +1,5 @@
-import {StrictMode} from 'react';
+import {StrictMode, Suspense, lazy} from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
-import MobileApp from './MobileApp.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
 
@@ -32,10 +30,23 @@ if (typeof window !== 'undefined') {
   }
 }
 
+// اختيار التطبيق: السائق (VITE_APP_MODE=driver أو المسار /driver أو ?app=driver) / تطبيق الطلبات (requests) / المكتب.
+// كل تطبيق بيتحمّل لوحده (code-splitting) فموبايل السائق مابينزّلش كود المكتب.
+const appMode = (import.meta as any).env?.VITE_APP_MODE;
+const isDriverApp = appMode === 'driver'
+  || (typeof window !== 'undefined' && (window.location.pathname.startsWith('/driver') || new URLSearchParams(window.location.search).get('app') === 'driver'));
+const Root = isDriverApp
+  ? lazy(() => import('./driver/DriverApp'))
+  : appMode === 'requests'
+    ? lazy(() => import('./MobileApp.tsx'))
+    : lazy(() => import('./App.tsx'));
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary fullScreen>
-      {(import.meta as any).env?.VITE_APP_MODE === 'requests' ? <MobileApp /> : <App />}
+      <Suspense fallback={<div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontWeight: 700 }}>جاري التحميل...</div>}>
+        <Root />
+      </Suspense>
     </ErrorBoundary>
   </StrictMode>,
 );
