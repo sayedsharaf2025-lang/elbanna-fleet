@@ -1,8 +1,7 @@
 name: Build Android APK
 
 on:
-  push:
-    branches: [main, master]
+  # بقى يدوي فقط (Actions ← Run workflow) عشان الـ push يبني تطبيقين بس: السائق والكامل
   workflow_dispatch:
 
 jobs:
@@ -14,6 +13,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - uses: actions/setup-java@v4
         with:
@@ -29,7 +29,6 @@ jobs:
           # اختياري: لو عايز تثبّت مشروع Supabase في التطبيق بدل الافتراضي
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
 
       - name: Add Android platform
         run: |
@@ -37,20 +36,6 @@ jobs:
           # صلاحية الكاميرا (تصوير فواتير شراء قطع الغيار)
           sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <application#' android/app/src/main/AndroidManifest.xml
           npx cap sync android
-
-      # توقيع ثابت: بنحط الـ keystore المحفوظ في Secrets مكان debug.keystore، فكل نسخة بتتوقّع بنفس المفتاح
-      # وتقدر تتثبّت فوق النسخة القديمة من غير ما تمسحها. (لو الـ Secret مش موجود بيكمّل بمفتاح عشوائي مع تحذير)
-      - name: Use fixed signing keystore
-        env:
-          KS_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
-        run: |
-          if [ -z "$KS_B64" ]; then
-            echo "::warning::ANDROID_DEBUG_KEYSTORE_BASE64 غير مضبوط - الـ APK هيتوقّع بمفتاح عشوائي ومش هيتحدّث فوق القديم"
-          else
-            mkdir -p ~/.android
-            echo "$KS_B64" | base64 -d > ~/.android/debug.keystore
-            keytool -list -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey >/dev/null
-          fi
 
       - name: Build debug APK
         working-directory: android
