@@ -12,7 +12,8 @@
     "test": "tsx --test tests/*.test.ts",
     "build:apk": "vite build --mode requests && cap sync android",
     "dev:driver": "vite --port=3001 --host=0.0.0.0 --mode driver",
-    "build:driver": "vite build --mode driver"
+    "build:driver": "vite build --mode driver",
+    "build:driver-apk": "cp capacitor.driver.config.ts capacitor.config.ts && vite build --mode driver && cap sync android"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

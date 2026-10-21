@@ -153,3 +153,9 @@ git push -u origin main
 - الدخول: كود السائق + رقم سري يحدده المكتب من شاشة «متابعة السائقين» ← «دخول تطبيق السائق» (مخزّن مشفّر في جدول `driver_app_access`).
 - سكريبتات قاعدة البيانات المطلوبة مرة واحدة: `sql/transport-trip.sql` و`sql/notifications.sql` و`sql/driver-app.sql` (كلها كمان داخل مخطط الجداول في شاشة الاتصال السحابي).
 - الإشعارات للسائق جوه التطبيق (تحديث كل 10 ثواني + بانر وصوت واهتزاز، وإشعار المتصفح لو الصفحة في الخلفية). إشعار حقيقي برّه التطبيق (FCM) مرحلة لاحقة.
+
+### APK تطبيق السائق
+- يتبني تلقائيًا من GitHub Actions (`.github/workflows/build-driver-apk.yml`) عند كل push على main، أو يدويًا: Actions ← Build Driver APK ← Run workflow.
+- النتيجة: Artifact اسمه `elbanna-driver-apk` فيه `elbanna-driver.apk` (نسخة debug تتثبّت مباشرة على الموبايل بعد السماح بالتثبيت من مصادر غير معروفة).
+- التطبيق باسم «سائق البنا» و`appId=com.elbanna.driver` (مختلف عن تطبيق الطلبات فيتثبتوا جنب بعض). إعداده في `capacitor.driver.config.ts`.
+- بناء محلي (يحتاج Android SDK): `npm run build:driver-apk` بعد `npx cap add android` مرة واحدة، وبعدين `cd android && ./gradlew assembleDebug`.
