@@ -1,4 +1,5 @@
-name: Build Driver Android APK
+name: Build Driver APK
+
 on:
   push:
     branches: [main, master]
@@ -14,7 +15,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: 'elbanna_fleet_v2/package-lock.json'
 
       - uses: actions/setup-java@v4
         with:
@@ -22,28 +22,51 @@ jobs:
           java-version: 21
 
       - name: Install dependencies
-        working-directory: ./elbanna_fleet_v2
         run: npm install --no-audit --no-fund
 
-      - name: Build Driver App
-        working-directory: ./elbanna_fleet_v2
-        run: npm run build:driver
+      # تطبيق السائق له appId واسم مختلفين عن تطبيق الطلبات، فبيتثبّتوا جنب بعض على نفس الموبايل
+      - name: Use driver Capacitor config
+        run: cp capacitor.driver.config.ts capacitor.config.ts
+
+      - name: Build web app (driver mode)
+        run: npx vite build --mode driver
         env:
+          # اختياري: لو عايز تثبّت مشروع Supabase في التطبيق بدل الافتراضي
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
 
       - name: Add Android platform
-        working-directory: ./elbanna_fleet_v2
         run: |
           npx cap add android
+          # صلاحية الاهتزاز (تنبيه الطلب الجديد)
+          sed -i 's#<application#<uses-permission android:name="android.permission.VIBRATE" />\n    <application#' android/app/src/main/AndroidManifest.xml
           npx cap sync android
 
+      # توقيع ثابت: بنحط الـ keystore المحفوظ في Secrets مكان debug.keystore، فكل نسخة بتتوقّع بنفس المفتاح
+      # وتقدر تتثبّت فوق النسخة القديمة من غير ما تمسحها. (لو الـ Secret مش موجود بيكمّل بمفتاح عشوائي مع تحذير)
+      - name: Use fixed signing keystore
+        env:
+          KS_B64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KS_B64" ]; then
+            echo "::warning::ANDROID_DEBUG_KEYSTORE_BASE64 غير مضبوط - الـ APK هيتوقّع بمفتاح عشوائي ومش هيتحدّث فوق القديم"
+          else
+            mkdir -p ~/.android
+            echo "$KS_B64" | base64 -d > ~/.android/debug.keystore
+            keytool -list -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey >/dev/null
+          fi
+
       - name: Build debug APK
-        working-directory: ./elbanna_fleet_v2/android
+        working-directory: android
         run: ./gradlew assembleDebug --no-daemon
+
+      - name: Name the APK
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk out/elbanna-driver.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: elbanna-driver-apk
-          path: elbanna_fleet_v2/android/app/build/outputs/apk/debug/app-debug.apk
+          path: out/elbanna-driver.apk
