@@ -1,0 +1,65 @@
+name: Build Full App APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # التطبيق الكامل: appId=com.elbanna.fleet واسمه «إدارة البنا» (غير تطبيق السائق وتطبيق الطلبات)
+      - name: Use full-app Capacitor config
+        run: cp capacitor.full.config.ts capacitor.config.ts
+
+      - name: Build web app (full app)
+        run: npx vite build --mode production
+        env:
+          # اختياري: لو عايز تثبّت مشروع Supabase في التطبيق بدل الافتراضي
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Add Android platform
+        run: |
+          npx cap add android
+          # صلاحية الكاميرا (تصوير فواتير شراء قطع الغيار)
+          sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <application#' android/app/src/main/AndroidManifest.xml
+          # رقم الإصدار بيزيد مع كل بناء (عشان التحديث فوق النسخة القديمة يشتغل)
+          sed -i 's/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName "1.0"/versionName "1.0.${{ github.run_number }}"/' android/app/build.gradle
+          npx cap sync android
+
+      # مفتاح توقيع ثابت: من غيره GitHub بيولّد مفتاح debug جديد كل مرة فالتحديث فوق نسخة مثبّتة بيفشل
+      - name: Use stable debug keystore
+        run: |
+          mkdir -p ~/.android
+          cp ci/debug.keystore ~/.android/debug.keystore
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Name the APK
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk out/elbanna-full.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: elbanna-full-apk
+          path: out/elbanna-full.apk

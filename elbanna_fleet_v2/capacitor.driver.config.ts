@@ -5,7 +5,8 @@ const config: CapacitorConfig = {
   appId: 'com.elbanna.driver',
   appName: 'سائق البنا',
   webDir: 'dist',
-  android: { allowMixedContent: false },
+  // أندرويد 15+: بيمنع المحتوى من الظهور تحت شريط الحالة وشريط التنقل
+  android: { allowMixedContent: false, adjustMarginsForEdgeToEdge: 'auto' },
 };
 
 export default config;

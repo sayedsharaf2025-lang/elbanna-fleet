@@ -159,3 +159,14 @@ git push -u origin main
 - النتيجة: Artifact اسمه `elbanna-driver-apk` فيه `elbanna-driver.apk` (نسخة debug تتثبّت مباشرة على الموبايل بعد السماح بالتثبيت من مصادر غير معروفة).
 - التطبيق باسم «سائق البنا» و`appId=com.elbanna.driver` (مختلف عن تطبيق الطلبات فيتثبتوا جنب بعض). إعداده في `capacitor.driver.config.ts`.
 - بناء محلي (يحتاج Android SDK): `npm run build:driver-apk` بعد `npx cap add android` مرة واحدة، وبعدين `cd android && ./gradlew assembleDebug`.
+
+### بناء التطبيقين على GitHub (السائق + الكامل)
+| التطبيق | Workflow | الحزمة (appId) | الاسم على الموبايل | الناتج (Artifact) |
+|---|---|---|---|---|
+| السائق | `build-driver-apk.yml` | `com.elbanna.driver` | سائق البنا | `elbanna-driver-apk` ← `elbanna-driver.apk` |
+| الكامل (الإدارة) | `build-full-apk.yml` | `com.elbanna.fleet` | إدارة البنا | `elbanna-full-apk` ← `elbanna-full.apk` |
+
+- الاتنين بيتبنوا تلقائيًا عند كل push على main (أو يدويًا من Actions ← Run workflow)، وبيتثبّتوا جنب بعض لأن الـ appId والاسم مختلفين.
+- `build-apk.yml` (تطبيق الطلبات القديم `com.elbanna.requests` / «البنا جروب») بقى يدوي فقط.
+- رقم الإصدار (`versionCode`) بياخد رقم تشغيل الـ workflow فبيزيد مع كل بناء، والتوقيع بمفتاح ثابت (`ci/debug.keystore`) فالتحديث فوق النسخة المثبّتة بيشتغل من غير ما تمسحها. لو الـ repo عام يفضّل تخليه Private. ولو عندك .gitignore عام بيتجاهل `*.keystore` ضيف الملف بـ `git add -f ci/debug.keystore`.
+- إعدادات كل تطبيق: `capacitor.driver.config.ts` و`capacitor.full.config.ts` (بيتنسخوا مكان `capacitor.config.ts` وقت البناء بس).

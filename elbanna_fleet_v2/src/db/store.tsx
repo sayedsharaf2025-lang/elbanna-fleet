@@ -32,7 +32,8 @@ import {
   MaintenanceInvoiceItem
 } from '../types';
 import { getSupabaseClient } from './supabaseClient';
-import { hashPassword, isHashedPassword, verifyPassword } from './passwordUtil';
+import { usernameToEmail } from './authEmail';
+import { callAdminUsers } from './adminApi';
 import {
   INITIAL_OFFICIALS,
   INITIAL_DRIVERS,
@@ -66,6 +67,18 @@ export { normalizeDateToYmd };
 
 const DbContext = createContext<DbContextType | undefined>(undefined);
 
+// صف جدول profiles ← شكل SystemUser اللي التطبيق شغّال بيه (من غير أي كلمة سر)
+const profileToSystemUser = (p: any): SystemUser => ({
+  id: p.id,
+  username: p.username,
+  display_name: p.display_name,
+  role_tag: p.role_tag,
+  allowed_screens: Array.isArray(p.allowed_screens) ? p.allowed_screens : [],
+  linked_official_id: p.linked_official_id || undefined,
+  active: p.active !== false,
+  has_login: !!p.auth_user_id,
+});
+
 export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [drivers, setDrivers] = useState<Driver[]>(() => 
     loadSavedArray('elbanna_drivers', INITIAL_DRIVERS)
@@ -95,133 +108,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     return raw.map(m => ({ ...m, date: normalizeDateToYmd(m.date) }));
   });
 
-  const [adminPassword, _setAdminPassword] = useState<string>(() => 
-    localStorage.getItem('elbanna_admin_password') || 'admin'
-  );
-
-  const [managerPassword, _setManagerPassword] = useState<string>(() => 
-    localStorage.getItem('elbanna_manager_password') || 'manager'
-  );
-
-  // أسماء المستخدمين القابلة للتعديل لكل حساب من الحسابات الثابتة (بدل الاسم المقفول قديمًا)
-  const [adminUsername, _setAdminUsername] = useState<string>(() =>
-    localStorage.getItem('elbanna_admin_username') || 'admin'
-  );
-  const [managerUsername, _setManagerUsername] = useState<string>(() =>
-    localStorage.getItem('elbanna_manager_username') || 'manager'
-  );
-
-  const updateAdminUsername = (newUsername: string) => {
-    const trimmed = newUsername.trim();
-    if (!trimmed) return;
-    _setAdminUsername(trimmed);
-    localStorage.setItem('elbanna_admin_username', trimmed);
-    const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
-      supabase.from('system_settings').upsert({ key: 'admin_username', value: trimmed })
-        .then(({ error }) => { if (error) console.warn("Supabase save admin_username error:", error); });
-    }
-  };
-
-  const updateManagerUsername = (newUsername: string) => {
-    const trimmed = newUsername.trim();
-    if (!trimmed) return;
-    _setManagerUsername(trimmed);
-    localStorage.setItem('elbanna_manager_username', trimmed);
-    const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
-      supabase.from('system_settings').upsert({ key: 'manager_username', value: trimmed })
-        .then(({ error }) => { if (error) console.warn("Supabase save manager_username error:", error); });
-    }
-  };
-
-  const updateAdminPassword = (newPass: string) => {
-    _setAdminPassword(newPass);
-    localStorage.setItem('elbanna_admin_password', newPass);
-    const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
-      supabase.from('system_settings').upsert({ key: 'admin_password', value: newPass })
-        .then(({ error }) => {
-          if (error) console.warn("Supabase save admin_password error:", error);
-        });
-    }
-  };
-
-  const updateManagerPassword = (newPass: string) => {
-    _setManagerPassword(newPass);
-    localStorage.setItem('elbanna_manager_password', newPass);
-    const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
-      supabase.from('system_settings').upsert({ key: 'manager_password', value: newPass })
-        .then(({ error }) => {
-          if (error) console.warn("Supabase save manager_password error:", error);
-        });
-    }
-  };
-
-  const [movementSupervisorPassword, _setMovementSupervisorPassword] = useState<string>(() =>
-    localStorage.getItem('elbanna_movement_supervisor_password') || 'movement123'
-  );
-
-  const [requestsAgentPassword, _setRequestsAgentPassword] = useState<string>(() =>
-    localStorage.getItem('elbanna_requests_agent_password') || 'requests123'
-  );
-
-  const [movementSupervisorUsername, _setMovementSupervisorUsername] = useState<string>(() =>
-    localStorage.getItem('elbanna_movement_supervisor_username') || 'movement_supervisor'
-  );
-  const [requestsAgentUsername, _setRequestsAgentUsername] = useState<string>(() =>
-    localStorage.getItem('elbanna_requests_agent_username') || 'requests_agent'
-  );
-
-  const updateMovementSupervisorUsername = (newUsername: string) => {
-    const trimmed = newUsername.trim();
-    if (!trimmed) return;
-    _setMovementSupervisorUsername(trimmed);
-    localStorage.setItem('elbanna_movement_supervisor_username', trimmed);
-    const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
-      supabase.from('system_settings').upsert({ key: 'movement_supervisor_username', value: trimmed })
-        .then(({ error }) => { if (error) console.warn("Supabase save movement_supervisor_username error:", error); });
-    }
-  };
-
-  const updateRequestsAgentUsername = (newUsername: string) => {
-    const trimmed = newUsername.trim();
-    if (!trimmed) return;
-    _setRequestsAgentUsername(trimmed);
-    localStorage.setItem('elbanna_requests_agent_username', trimmed);
-    const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
-      supabase.from('system_settings').upsert({ key: 'requests_agent_username', value: trimmed })
-        .then(({ error }) => { if (error) console.warn("Supabase save requests_agent_username error:", error); });
-    }
-  };
-
-  const updateMovementSupervisorPassword = (newPass: string) => {
-    _setMovementSupervisorPassword(newPass);
-    localStorage.setItem('elbanna_movement_supervisor_password', newPass);
-    const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
-      supabase.from('system_settings').upsert({ key: 'movement_supervisor_password', value: newPass })
-        .then(({ error }) => {
-          if (error) console.warn("Supabase save movement_supervisor_password error:", error);
-        });
-    }
-  };
-
-  const updateRequestsAgentPassword = (newPass: string) => {
-    _setRequestsAgentPassword(newPass);
-    localStorage.setItem('elbanna_requests_agent_password', newPass);
-    const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected) {
-      supabase.from('system_settings').upsert({ key: 'requests_agent_password', value: newPass })
-        .then(({ error }) => {
-          if (error) console.warn("Supabase save requests_agent_password error:", error);
-        });
-    }
-  };
-
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem('elbanna_current_user');
@@ -230,186 +116,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       return null;
     }
   });
-
-  const login = async (
-    username: string, 
-    role: 'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent', 
-    password?: string, 
-    officialId?: string
-  ): Promise<{ success: boolean; error?: string }> => {
-    const supabase = getSupabaseClient();
-    
-    if (role === 'admin') {
-      let savedAdminPass = adminPassword;
-      let savedAdminUser = adminUsername;
-      if (supabase) {
-        try {
-          const { data, error } = await supabase.from('system_settings').select('key, value').in('key', ['admin_password', 'admin_username']);
-          if (!error && data) {
-            const passRow = data.find(r => r.key === 'admin_password');
-            const userRow = data.find(r => r.key === 'admin_username');
-            if (passRow?.value) {
-              savedAdminPass = passRow.value;
-              _setAdminPassword(passRow.value);
-              localStorage.setItem('elbanna_admin_password', passRow.value);
-            }
-            if (userRow?.value) {
-              savedAdminUser = userRow.value;
-              _setAdminUsername(userRow.value);
-              localStorage.setItem('elbanna_admin_username', userRow.value);
-            }
-          }
-        } catch (e) {
-          console.warn("Direct login check error:", e);
-        }
-      }
-      if (username.trim().toLowerCase() === savedAdminUser.trim().toLowerCase() && password === savedAdminPass) {
-        const uObj: User = { username: savedAdminUser, role: 'admin', name: 'أدمن النظام', allowedScreens: rolePermissions.admin || DEFAULT_ROLE_PERMISSIONS.admin };
-        setCurrentUser(uObj);
-        localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
-        return { success: true };
-      }
-      return { success: false, error: 'اسم المستخدم أو كلمة المرور للأدمن غير صحيحة' };
-    } else if (role === 'manager') {
-      let savedManagerPass = managerPassword;
-      let savedManagerUser = managerUsername;
-      if (supabase) {
-        try {
-          const { data, error } = await supabase.from('system_settings').select('key, value').in('key', ['manager_password', 'manager_username']);
-          if (!error && data) {
-            const passRow = data.find(r => r.key === 'manager_password');
-            const userRow = data.find(r => r.key === 'manager_username');
-            if (passRow?.value) {
-              savedManagerPass = passRow.value;
-              _setManagerPassword(passRow.value);
-              localStorage.setItem('elbanna_manager_password', passRow.value);
-            }
-            if (userRow?.value) {
-              savedManagerUser = userRow.value;
-              _setManagerUsername(userRow.value);
-              localStorage.setItem('elbanna_manager_username', userRow.value);
-            }
-          }
-        } catch (e) {
-          console.warn("Direct login check error:", e);
-        }
-      }
-      if (username.trim().toLowerCase() === savedManagerUser.trim().toLowerCase() && password === savedManagerPass) {
-        const uObj: User = { username: savedManagerUser, role: 'manager', name: 'مدير عام الحركة', allowedScreens: rolePermissions.manager || DEFAULT_ROLE_PERMISSIONS.manager };
-        setCurrentUser(uObj);
-        localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
-        return { success: true };
-      }
-      return { success: false, error: 'اسم المستخدم أو كلمة المرور للمدير غير صحيحة' };
-    } else if (role === 'supervisor') {
-      if (!officialId) {
-        return { success: false, error: 'الرجاء اختيار اسم مشرف الصرف' };
-      }
-      
-      let expectedPassword = '123';
-      let officialName = '';
-      
-      if (supabase) {
-        try {
-          const { data, error } = await supabase.from('officials').select('password, name').eq('id', officialId).maybeSingle();
-          if (!error && data) {
-            expectedPassword = data.password || '123';
-            officialName = data.name;
-          }
-        } catch (e) {
-          console.warn("Direct login official check error:", e);
-        }
-      }
-      
-      if (!officialName) {
-        const official = officials.find(o => o.id === officialId);
-        if (official) {
-          expectedPassword = official.password || '123';
-          officialName = official.name;
-        }
-      }
-      
-      if (officialName) {
-        if (password === expectedPassword) {
-          const uObj: User = { 
-            username: `supervisor_${officialId}`, 
-            role: 'supervisor', 
-            officialId, 
-            name: officialName,
-            allowedScreens: officialCustomScreens[officialId] || rolePermissions.supervisor || DEFAULT_ROLE_PERMISSIONS.supervisor
-          };
-          setCurrentUser(uObj);
-          localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
-          return { success: true };
-        }
-        return { success: false, error: 'كلمة المرور لمشرف الصرف غير صحيحة' };
-      }
-      return { success: false, error: 'مشرف الصرف غير موجود بقاعدة البيانات' };
-    } else if (role === 'movement_supervisor') {
-      let savedPass = movementSupervisorPassword;
-      let savedUser = movementSupervisorUsername;
-      if (supabase) {
-        try {
-          const { data, error } = await supabase.from('system_settings').select('key, value').in('key', ['movement_supervisor_password', 'movement_supervisor_username']);
-          if (!error && data) {
-            const passRow = data.find(r => r.key === 'movement_supervisor_password');
-            const userRow = data.find(r => r.key === 'movement_supervisor_username');
-            if (passRow?.value) {
-              savedPass = passRow.value;
-              _setMovementSupervisorPassword(passRow.value);
-              localStorage.setItem('elbanna_movement_supervisor_password', passRow.value);
-            }
-            if (userRow?.value) {
-              savedUser = userRow.value;
-              _setMovementSupervisorUsername(userRow.value);
-              localStorage.setItem('elbanna_movement_supervisor_username', userRow.value);
-            }
-          }
-        } catch (e) {
-          console.warn("Direct login check error:", e);
-        }
-      }
-      if (username.trim().toLowerCase() === savedUser.trim().toLowerCase() && password === savedPass) {
-        const uObj: User = { username: savedUser, role: 'movement_supervisor', name: 'مشرف الحركة', allowedScreens: rolePermissions.movement_supervisor || DEFAULT_ROLE_PERMISSIONS.movement_supervisor };
-        setCurrentUser(uObj);
-        localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
-        return { success: true };
-      }
-      return { success: false, error: 'اسم المستخدم أو كلمة المرور لمشرف الحركة غير صحيحة' };
-    } else if (role === 'requests_agent') {
-      let savedPass = requestsAgentPassword;
-      let savedUser = requestsAgentUsername;
-      if (supabase) {
-        try {
-          const { data, error } = await supabase.from('system_settings').select('key, value').in('key', ['requests_agent_password', 'requests_agent_username']);
-          if (!error && data) {
-            const passRow = data.find(r => r.key === 'requests_agent_password');
-            const userRow = data.find(r => r.key === 'requests_agent_username');
-            if (passRow?.value) {
-              savedPass = passRow.value;
-              _setRequestsAgentPassword(passRow.value);
-              localStorage.setItem('elbanna_requests_agent_password', passRow.value);
-            }
-            if (userRow?.value) {
-              savedUser = userRow.value;
-              _setRequestsAgentUsername(userRow.value);
-              localStorage.setItem('elbanna_requests_agent_username', userRow.value);
-            }
-          }
-        } catch (e) {
-          console.warn("Direct login check error:", e);
-        }
-      }
-      if (username.trim().toLowerCase() === savedUser.trim().toLowerCase() && password === savedPass) {
-        const uObj: User = { username: savedUser, role: 'requests_agent', name: 'مستخدم طلبات النقل', allowedScreens: rolePermissions.requests_agent || DEFAULT_ROLE_PERMISSIONS.requests_agent };
-        setCurrentUser(uObj);
-        localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
-        return { success: true };
-      }
-      return { success: false, error: 'اسم المستخدم أو كلمة المرور لمستخدم طلبات النقل غير صحيحة' };
-    }
-    return { success: false, error: 'نوع الحساب غير معروف' };
-  };
 
   // تسجيل دخول موحّد بدون اختيار قسم/رتبة مقدمًا — يكتب المستخدم اسمه وكلمة المرور بس،
   // والنظام بيجرب يتعرف على نوع الحساب تلقائيًا (مشرف صرف بالاسم، أو أدمن/مدير/مشرف حركة/طلبات نقل باليوزرنيم)
@@ -424,67 +130,87 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     return screens.includes(screenId);
   };
 
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
+
+  // ===== الدخول عبر Supabase Auth =====
+  // اسم المستخدم ← بريد داخلي ثابت (usernameToEmail) ← signInWithPassword. كلمة السر عمرها ما بتتخزن في
+  // جدول ولا في الجهاز؛ الجلسة (JWT) هي اللي بتفتح الجداول عبر سياسات RLS، وتجديدها تلقائي.
+  const refreshSystemUsers = async (): Promise<SystemUser[] | null> => {
+    const client = getSupabaseClient();
+    if (!client) return null;
+    const { data, error } = await client.from('profiles').select('*').order('created_at', { ascending: true });
+    if (error || !data) return null;
+    const list = data.map(profileToSystemUser);
+    systemUsersRef.current = list;
+    setSystemUsers(list);
+    return list;
+  };
+
   const loginAuto = async (identifier: string, password: string): Promise<{ success: boolean; error?: string }> => {
     const trimmed = identifier.trim();
-    if (!trimmed) {
-      return { success: false, error: 'يرجى إدخال اسم المستخدم' };
-    }
-    if (!password) {
-      return { success: false, error: 'يرجى إدخال كلمة المرور' };
+    if (!trimmed) return { success: false, error: 'يرجى إدخال اسم المستخدم' };
+    if (!password) return { success: false, error: 'يرجى إدخال كلمة المرور' };
+    const client = getSupabaseClient();
+    if (!client) return { success: false, error: 'إعدادات الاتصال بقاعدة البيانات غير متوفرة.' };
+
+    const { data, error } = await client.auth.signInWithPassword({ email: usernameToEmail(trimmed), password });
+    if (error || !data?.session || !data.user) {
+      const m = String(error?.message || '');
+      if (/fetch|network/i.test(m)) return { success: false, error: 'مفيش اتصال بالإنترنت. جرّب تاني.' };
+      if ((error as any)?.status === 429 || /rate|too many/i.test(m)) return { success: false, error: 'محاولات كتير — استنى شوية وجرّب تاني.' };
+      return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
     }
 
-    // قبل أي حاجة، نجيب أحدث نسخة من جدول المستخدمين من السحابة مباشرة (مش معتمدين على النسخة
-    // المحفوظة محليًا من وقت فتح الصفحة) — عشان لو حد غيّر اسم مستخدم أو باسورد أو شاشات من
-    // جهاز تاني، يتفعّل التغيير فورًا هنا من غير ما يستنى أول مزامنة عامة للتطبيق
-    let latestSystemUsers = systemUsers;
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.from('system_settings').select('value').eq('key', 'system_users').maybeSingle();
-        if (!error && data?.value) {
-          const parsed = JSON.parse(data.value);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            latestSystemUsers = mergeNewScreensIntoAdminUser(parsed);
-            setSystemUsers(latestSystemUsers);
-            localStorage.setItem('elbanna_system_users', JSON.stringify(latestSystemUsers));
-          }
-        }
-      } catch (e) {
-        console.warn("Fetch fresh system_users at login error (falling back to local copy):", e);
-      }
+    const { data: prof, error: profErr } = await client.from('profiles').select('*').eq('auth_user_id', data.user.id).maybeSingle();
+    if (profErr || !prof || !prof.active) {
+      await client.auth.signOut({ scope: 'local' });
+      return { success: false, error: prof && !prof.active ? 'الحساب ده موقوف — كلّم الأدمن.' : 'الحساب مش مفعّل في النظام — كلّم الأدمن.' };
     }
-
-    // المصدر الوحيد للدخول دلوقتي: جدول المستخدمين الموحّد — مفيش ارتباط بقسم أو رتبة ثابتة
-    const matched = latestSystemUsers.find(u => u.username.trim().toLowerCase() === trimmed.toLowerCase() && verifyPassword(password, u.password));
-    if (matched) {
-      // ترقية تلقائية: لو الباسورد لسه مخزن كنص عادي نشفّره أول ما صاحبه يدخل بنجاح
-      if (!isHashedPassword(matched.password)) {
-        const hashedPw = hashPassword(password);
-        commitSystemUsers<void>(base => ({ next: base.map(u => u.id === matched.id ? { ...u, password: hashedPw } : u) }));
-        if (matched.linked_official_id) setOfficialPasswordHash(matched.linked_official_id, hashedPw);
-      }
-      // بداية نشاط جديد (لتسجيل الخروج التلقائي بعد الخمول)
-      localStorage.setItem('elbanna_last_activity', String(Date.now()));
-      const uObj: User = {
-        username: matched.username,
-        role: matched.linked_official_id ? 'supervisor' : (matched.role_tag === 'custom' ? 'custom' : matched.role_tag),
-        officialId: matched.linked_official_id,
-        systemUserId: matched.id,
-        name: matched.display_name,
-        allowedScreens: matched.allowed_screens,
-      };
-      setCurrentUser(uObj);
-      localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
-      return { success: true };
-    }
-
-    return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
+    const matched = profileToSystemUser(prof);
+    // بداية نشاط جديد (لتسجيل الخروج التلقائي بعد الخمول)
+    localStorage.setItem('elbanna_last_activity', String(Date.now()));
+    const uObj: User = {
+      username: matched.username,
+      role: matched.linked_official_id ? 'supervisor' : (matched.role_tag === 'custom' ? 'custom' : matched.role_tag),
+      officialId: matched.linked_official_id,
+      systemUserId: matched.id,
+      name: matched.display_name,
+      allowedScreens: matched.allowed_screens,
+    };
+    setCurrentUser(uObj);
+    localStorage.setItem('elbanna_current_user', JSON.stringify(uObj));
+    refreshSystemUsers();
+    return { success: true };
   };
 
   const logout = () => {
     setCurrentUser(null);
     localStorage.removeItem('elbanna_current_user');
+    // scope محلي: يسجّل خروج الجهاز ده بس (مش كل أجهزة المستخدم)
+    try { getSupabaseClient()?.auth.signOut({ scope: 'local' }); } catch { /* تجاهل */ }
   };
+
+  // لو الجلسة الفعلية انتهت أو اتلغت (توكن منتهي، حساب اتوقف…) نسجّل خروج المستخدم فورًا بدل ما يفضل شايف شاشات فاضية
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client) return;
+    let cancelled = false;
+    if (currentUser) {
+      client.auth.getSession().then(({ data }) => { if (!cancelled && !data.session) logout(); });
+    }
+    const { data: sub } = client.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') { setCurrentUser(null); localStorage.removeItem('elbanna_current_user'); }
+    });
+    return () => { cancelled = true; sub.subscription.unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // تنضيف أي أسرار قديمة كانت متخزنة على الجهاز من النظام القديم (كلمات سر + قايمة المستخدمين)
+  useEffect(() => {
+    ['elbanna_system_users', 'elbanna_admin_password', 'elbanna_manager_password', 'elbanna_movement_supervisor_password', 'elbanna_requests_agent_password']
+      .forEach(k => { try { localStorage.removeItem(k); } catch { /* تجاهل */ } });
+  }, []);
 
   const [custodyAccounts, setCustodyAccounts] = useState<CustodyAccount[]>(() => {
     try {
@@ -645,7 +371,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (!client) return;
     let busy = false;
     const sync = async () => {
-      if (busy || isDownloadingRef.current || document.visibilityState === 'hidden') return;
+      if (busy || !currentUserRef.current || isDownloadingRef.current || document.visibilityState === 'hidden') return;
       busy = true;
       try {
         const since = new Date(Date.now() - 30 * 86400000).toISOString();
@@ -731,56 +457,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     });
   };
 
-  // ====== نظام المستخدمين الموحّد — شاشة واحدة، من غير ارتباط بقسم/رتبة ثابتة ======
-  // أول مرة يتحمّل فيها النظام بعد التحديث ده، مفيش "systemUsers" محفوظة لسه، فبنعمل ترحيل
-  // تلقائي لمرة واحدة: كل حساب موجود فعليًا (أدمن/مدير/مشرف حركة/مستخدم طلبات نقل + كل مشرف
-  // صرف) بيتحول لسطر في الجدول الموحد بنفس اليوزر/الباسورد/الشاشات، من غير ما حد يفقد دخوله.
-  const buildMigratedSystemUsers = (): SystemUser[] => {
-    const fixedAccounts: SystemUser[] = [
-      { id: 'sysuser_admin', username: adminUsername, password: adminPassword, display_name: 'أدمن النظام', role_tag: 'admin', allowed_screens: rolePermissions.admin || DEFAULT_ROLE_PERMISSIONS.admin },
-      { id: 'sysuser_manager', username: managerUsername, password: managerPassword, display_name: 'المدير العام', role_tag: 'manager', allowed_screens: rolePermissions.manager || DEFAULT_ROLE_PERMISSIONS.manager },
-      { id: 'sysuser_movement_supervisor', username: movementSupervisorUsername, password: movementSupervisorPassword, display_name: 'مشرف الحركة', role_tag: 'movement_supervisor', allowed_screens: rolePermissions.movement_supervisor || DEFAULT_ROLE_PERMISSIONS.movement_supervisor },
-      { id: 'sysuser_requests_agent', username: requestsAgentUsername, password: requestsAgentPassword, display_name: 'مستخدم طلبات النقل', role_tag: 'requests_agent', allowed_screens: rolePermissions.requests_agent || DEFAULT_ROLE_PERMISSIONS.requests_agent },
-    ];
-    const officialAccounts: SystemUser[] = officials.map(o => ({
-      id: `sysuser_official_${o.id}`,
-      username: o.name,
-      password: o.password || '123',
-      display_name: o.name,
-      role_tag: 'custom',
-      allowed_screens: officialCustomScreens[o.id] || rolePermissions.supervisor || DEFAULT_ROLE_PERMISSIONS.supervisor,
-      linked_official_id: o.id,
-    }));
-    return [...fixedAccounts, ...officialAccounts];
-  };
-
-  // أي شاشة جديدة تتضاف للنظام لاحقًا (زي قسم الصيانة) لازم الأدمن يشوفها تلقائيًا من غير ما
-  // يحتاج يروح يفعّلها يدوي بنفسه من شاشة المستخدمين — فبندمج أي شاشة افتراضية لأدمن لسه مش
-  // موجودة في أي حساب محفوظ خالص (يعني شاشة جديدة فعلًا) على حساب الأدمن تحديدًا، من غير ما
-  // نلمس تخصيصات أي مستخدم تاني عمله الأدمن بنفسه.
-  const mergeNewScreensIntoAdminUser = (users: SystemUser[]): SystemUser[] => {
-    const allKnownScreenIds = new Set(users.flatMap(u => u.allowed_screens));
-    const missingForAdmin = DEFAULT_ROLE_PERMISSIONS.admin.filter(s => !allKnownScreenIds.has(s));
-    if (missingForAdmin.length === 0) return users;
-    return users.map(u => u.role_tag === 'admin'
-      ? { ...u, allowed_screens: [...u.allowed_screens, ...missingForAdmin] }
-      : u
-    );
-  };
-
-  const [systemUsers, setSystemUsers] = useState<SystemUser[]>(() => {
-    const saved = loadSavedArray<SystemUser>('elbanna_system_users', []);
-    if (saved.length > 0) return mergeNewScreensIntoAdminUser(saved);
-    return buildMigratedSystemUsers();
-  });
-
-  // نسخة حيّة من المستخدمين (بتتحدث مع كل رسم) + طابور لتسلسل عمليات الحفظ عشان مايحصلش تداخل بينها
+  // ====== نظام المستخدمين الموحّد (Supabase Auth + جدول profiles) ======
+  // الاسم/الشاشات/الربط بالعهدة في جدول profiles (القراءة بس من التطبيق، RLS)، وكلمات السر عند Supabase Auth.
+  // أي إضافة/تعديل/حذف بتعدّي على Edge Function (admin-users) اللي بتتحقق إن المنفّذ أدمن أو صاحب شاشة المستخدمين.
+  // الأدمن بيشوف كل المستخدمين؛ غيره بيشوف نفسه بس (سياسة RLS).
+  const [systemUsers, setSystemUsers] = useState<SystemUser[]>([]);
   const systemUsersRef = useRef<SystemUser[]>(systemUsers);
   systemUsersRef.current = systemUsers;
-  // true لو قايمة المستخدمين اللي على الجهاز ده اتحفظت فعلًا (مش مجرد قايمة افتراضية اتولّدت لأول فتح)
-  // — بنستخدمها عشان ماننشرش أبدًا قايمة افتراضية (admin/admin) فوق السحابة
-  const systemUsersPersistedRef = useRef<boolean>(loadSavedArray<SystemUser>('elbanna_system_users', []).length > 0);
-  const systemUsersQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const [systemUsersSyncError, setSystemUsersSyncError] = useState<string | null>(null);
 
   // مشتقّات الإشعارات — لازم تيجي بعد تعريف systemUsers (شوف الملحوظة فوق عند notificationScreens)
@@ -788,144 +471,68 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const myNotifications = notifications.filter(n => isVisibleTo(n, notificationScreens()));
   const unreadNotificationCount = myNotifications.filter(n => isUnread(n, notificationKey)).length;
 
-  type SystemUsersMutation<T> = { error: string } | { next: SystemUser[]; value?: T };
-
-  // حفظ المستخدمين بشكل مضمون:
-  //  1) بنجيب آخر نسخة من السحابة الأول (مش النسخة اللي في الجهاز) ونطبق التعديل عليها —
-  //     كده أي جهاز بنسخة قديمة مايقدرش يمسح مستخدم اتضاف من جهاز تاني.
-  //  2) الحفظ في السحابة مابقاش مشروط بحالة "isCloudConnected" (كان بيتخطى الحفظ بصمت لو الاتصال لسه ماجهزش
-  //     وقت إنشاء المستخدم، فيفضل المستخدم موجود على جهاز الإنشاء بس).
-  //  3) لو الحفظ فشل بنعيد المحاولة مرة، ولو فشل تاني بنرجّع cloudSaved=false عشان الشاشة تنبّه الأدمن.
-  const commitSystemUsers = <T,>(
-    mutator: (base: SystemUser[]) => SystemUsersMutation<T>
-  ): Promise<{ success: boolean; error?: string; value?: T; cloudSaved: boolean }> => {
-    const run = async () => {
-      const client = getSupabaseClient();
-      let base = systemUsersRef.current;
-      if (client) {
-        try {
-          const { data, error } = await client.from('system_settings').select('value').eq('key', 'system_users').maybeSingle();
-          if (!error && data?.value) {
-            const parsed = JSON.parse(data.value);
-            if (Array.isArray(parsed) && parsed.length > 0) base = mergeNewScreensIntoAdminUser(parsed);
-          }
-        } catch (e) {
-          console.warn("commitSystemUsers: fetch latest users failed, using local copy:", e);
-        }
-      }
-
-      const out = mutator(base);
-      if ('error' in out) return { success: false, error: out.error, cloudSaved: false };
-
-      const next = out.next;
-      systemUsersRef.current = next;
-      systemUsersPersistedRef.current = true;
-      setSystemUsers(next);
-      localStorage.setItem('elbanna_system_users', JSON.stringify(next));
-
-      if (!client) return { success: true, value: out.value, cloudSaved: false };
-
-      let lastErr = '';
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const { error } = await client.from('system_settings').upsert({ key: 'system_users', value: JSON.stringify(next) });
-          if (!error) {
-            setSystemUsersSyncError(null);
-            return { success: true, value: out.value, cloudSaved: true };
-          }
-          lastErr = error.message;
-        } catch (e: any) {
-          lastErr = e?.message || String(e);
-        }
-        await new Promise(r => setTimeout(r, 800));
-      }
-      console.warn("Supabase save system_users error:", lastErr);
-      setSystemUsersSyncError(lastErr || 'تعذّر الحفظ في السحابة');
-      return { success: true, value: out.value, cloudSaved: false };
-    };
-    const p = systemUsersQueueRef.current.then(run, run) as Promise<{ success: boolean; error?: string; value?: T; cloudSaved: boolean }>;
-    systemUsersQueueRef.current = p.catch(() => undefined);
-    return p;
-  };
-
   const addSystemUser = async (username: string, password: string, displayName: string, allowedScreens: string[]) => {
     const trimmedUser = username.trim();
-    const trimmedName = displayName.trim() || trimmedUser;
     if (!trimmedUser || !password) return { success: false, error: 'يرجى إدخال اسم مستخدم وكلمة مرور', cloudSaved: false };
-    const hashedPw = hashPassword(password);
     // ملاحظة: إنشاء المستخدم لا ينشئ حساب عهدة تلقائيًا — العهدة بتتنشأ يدويًا من
     // شاشة "🔐 إدارة كلمات مرور مسؤولي الصرف" (زر "إنشاء عهدة") بواسطة الأدمن.
-    const newUser: SystemUser = {
-      id: generateId('sysuser'),
-      username: trimmedUser,
-      password: hashedPw,
-      display_name: trimmedName,
-      role_tag: 'custom',
-      allowed_screens: allowedScreens,
-    };
-    const res = await commitSystemUsers<SystemUser>(base => {
-      if (base.some(u => u.username.trim().toLowerCase() === trimmedUser.toLowerCase())) {
-        return { error: 'اسم المستخدم ده مستخدم بالفعل' };
-      }
-      return { next: [...base, newUser], value: newUser };
-    });
-    return { success: res.success, error: res.error, user: res.value, cloudSaved: res.cloudSaved };
+    const res = await callAdminUsers({ action: 'create', username: trimmedUser, password, display_name: displayName.trim() || trimmedUser, allowed_screens: allowedScreens });
+    if (!res.ok) return { success: false, error: res.error, cloudSaved: false };
+    await refreshSystemUsers();
+    return { success: true, user: res.user ? profileToSystemUser(res.user) : undefined, cloudSaved: true };
   };
 
   // تحديث بيانات مستخدم (اسم/يوزر/باسورد/شاشات) — من غير أي إنشاء تلقائي لحساب عهدة
-  const updateSystemUser = async (id: string, updates: { username?: string; password?: string; display_name?: string; official_name?: string; allowed_screens?: string[] }) => {
-    const newHashed = updates.password ? hashPassword(updates.password) : undefined;
-    const res = await commitSystemUsers<SystemUser>(base => {
-      // لو المستخدم موجود على الجهاز ده بس (اتعمل قبل الإصلاح ومااترفعش للسحابة) نكمل من نسخة الجهاز
-      // ونرفعه للسحابة مع التعديل — كده "حفظ" واحد من جهاز الإنشاء بيصلّح دخوله من باقي الأجهزة
-      const target = base.find(u => u.id === id) || systemUsersRef.current.find(u => u.id === id);
-      if (!target) return { error: 'المستخدم غير موجود' };
-      if (updates.username) {
-        const trimmed = updates.username.trim();
-        if (base.some(u => u.id !== id && u.username.trim().toLowerCase() === trimmed.toLowerCase())) {
-          return { error: 'اسم المستخدم ده مستخدم بالفعل' };
-        }
-      }
-      const updatedUser: SystemUser = {
-        ...target,
-        username: updates.username?.trim() || target.username,
-        password: newHashed || target.password,
-        display_name: updates.display_name?.trim() || target.display_name,
-        allowed_screens: updates.allowed_screens || target.allowed_screens,
-      };
-      const existsInBase = base.some(u => u.id === id);
-      return { next: existsInBase ? base.map(u => u.id === id ? updatedUser : u) : [...base, updatedUser], value: updatedUser };
-    });
-    if (!res.success || !res.value) return { success: false, error: res.error, cloudSaved: false };
-    const updatedUser = res.value;
-    const linkedOfficialId = updatedUser.linked_official_id;
+  const updateSystemUser = async (id: string, updates: { username?: string; password?: string; display_name?: string; official_name?: string; allowed_screens?: string[]; active?: boolean }) => {
+    const body: Record<string, unknown> = { action: 'update', id };
+    if (updates.username !== undefined && updates.username.trim()) body.username = updates.username.trim();
+    if (updates.password) body.password = updates.password;
+    if (updates.display_name !== undefined && updates.display_name.trim()) body.display_name = updates.display_name.trim();
+    if (updates.allowed_screens) body.allowed_screens = updates.allowed_screens;
+    if (typeof updates.active === 'boolean') body.active = updates.active;
+    const res = await callAdminUsers(body);
+    if (!res.ok || !res.user) return { success: false, error: res.error, cloudSaved: false };
+    const updatedUser = profileToSystemUser(res.user);
+    await refreshSystemUsers();
 
     // اسم مسؤول التراخيص (حساب العهدة) مستقل عن الاسم الظاهر واسم المستخدم.
-    // الباسورد بس هو اللي بيفضل متزامن لأنه بيستخدم في الدخول.
-    if (linkedOfficialId) {
-      if (updates.official_name && updates.official_name.trim()) {
-        updateOfficialName(linkedOfficialId, updates.official_name.trim());
-      }
-      if (newHashed) {
-        setOfficialPasswordHash(linkedOfficialId, newHashed);
-      }
+    if (updatedUser.linked_official_id && updates.official_name && updates.official_name.trim()) {
+      updateOfficialName(updatedUser.linked_official_id, updates.official_name.trim());
     }
 
     // لو المستخدم ده هو نفسه الداخل دلوقتي، نحدّث جلسته النشطة فورًا من غير ما يحتاج يعمل تسجيل خروج
     if (currentUser?.systemUserId === id) {
-      const updatedSession = { ...currentUser, name: updatedUser.display_name, username: updatedUser.username, allowedScreens: updatedUser.allowed_screens, officialId: linkedOfficialId };
+      const updatedSession = { ...currentUser, name: updatedUser.display_name, username: updatedUser.username, allowedScreens: updatedUser.allowed_screens, officialId: updatedUser.linked_official_id };
       setCurrentUser(updatedSession);
       localStorage.setItem('elbanna_current_user', JSON.stringify(updatedSession));
     }
-
-    return { success: true, cloudSaved: res.cloudSaved };
+    return { success: true, cloudSaved: true };
   };
 
-  // حذف مستخدم من الجدول الموحد فقط — حساب العهدة المالية المربوط (لو موجود) بيفضل زي ما هو
+  // حذف مستخدم (حساب الدخول + صف profiles) — حساب العهدة المالية المربوط (لو موجود) بيفضل زي ما هو
   // ومايتمسحش تلقائي، حفاظًا على البيانات المالية؛ يتحذف بشكل منفصل ومقصود لو لزم الأمر
   const deleteSystemUser = async (id: string) => {
-    const res = await commitSystemUsers<void>(base => ({ next: base.filter(u => u.id !== id) }));
-    return { success: res.success, cloudSaved: res.cloudSaved };
+    const res = await callAdminUsers({ action: 'delete', id });
+    if (res.ok) await refreshSystemUsers();
+    return { success: res.ok, error: res.error, cloudSaved: res.ok };
+  };
+
+  // تفعيل دخول كل المستخدمين المنقولين من النظام القديم (أدمن بس): بيرجّع كلمة سر مؤقتة لكل واحد مرة واحدة
+  const provisionSystemUsers = async () => {
+    const res = await callAdminUsers<Array<{ id: string; username: string; display_name: string; password?: string; error?: string }>>({ action: 'provision' });
+    if (res.ok) await refreshSystemUsers();
+    return { success: res.ok, error: res.error, results: res.data || [] };
+  };
+
+  // تغيير كلمة سر المستخدم الحالي بنفسه: بنتأكد من الحالية الأول (إعادة دخول) وبعدين Auth بيغيّرها
+  const changeOwnPassword = async (currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    const client = getSupabaseClient();
+    if (!client || !currentUser) return { success: false, error: 'لازم تكون مسجّل دخول.' };
+    if (newPassword.length < 8) return { success: false, error: 'كلمة المرور لازم تكون 8 حروف على الأقل.' };
+    const { error: reErr } = await client.auth.signInWithPassword({ email: usernameToEmail(currentUser.username), password: currentPassword });
+    if (reErr) return { success: false, error: 'كلمة المرور الحالية غير صحيحة.' };
+    const { error } = await client.auth.updateUser({ password: newPassword });
+    return error ? { success: false, error: error.message } : { success: true };
   };
 
   // إنشاء حساب عهدة (مشرف صرف) يدويًا لمستخدم موجود — بيتم من شاشة إدارة مسؤولي الصرف، مش تلقائي
@@ -939,18 +546,15 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       name: user.display_name,
       cash_custody: initial?.cash_custody || 0,
       visa_custody: initial?.visa_custody || 0,
-      password: user.password,
     });
-    const res = await commitSystemUsers<void>(base => {
-      if (!base.some(u => u.id === userId)) return { error: 'المستخدم غير موجود' };
-      return { next: base.map(u => u.id === userId ? { ...u, linked_official_id: official.id } : u) };
-    });
-    if (currentUser?.systemUserId === userId) {
+    const res = await callAdminUsers({ action: 'update', id: userId, linked_official_id: official.id });
+    if (res.ok) await refreshSystemUsers();
+    if (res.ok && currentUser?.systemUserId === userId) {
       const updatedSession = { ...currentUser, officialId: official.id };
       setCurrentUser(updatedSession);
       localStorage.setItem('elbanna_current_user', JSON.stringify(updatedSession));
     }
-    return { success: res.success, error: res.error, official, cloudSaved: res.cloudSaved };
+    return { success: res.ok, error: res.error, official, cloudSaved: res.ok };
   };
 
   const addFarmIfNew = (farmName: string) => {
@@ -1392,8 +996,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const list = (v: any): any[] => (Array.isArray(v) ? v : []);
     const restoredOfficials = list(data.officials).map((o: any) => ({
       ...o,
-      // كلمات المرور مش بتتحط في النسخة الاحتياطية: بنحافظ على الموجودة، والجديد بياخد الافتراضي مشفّر
-      password: officials.find(x => x.id === o.id)?.password || hashPassword('123'),
+      // كلمات المرور مالهاش وجود في جدول المسؤولين (الدخول عبر Supabase Auth)
+      password: undefined,
     }));
 
     // السجلات اللي في النسخة لازم تتشال من قائمة المحذوفات عشان ماتتفلترش بعد الاسترجاع
@@ -1632,6 +1236,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (!client) return;
 
     const delayDebounce = setTimeout(async () => {
+      if (!currentUserRef.current) return; // الجداول مقفولة قبل تسجيل الدخول
       if (isDownloadingRef.current) {
         await new Promise(r => setTimeout(r, 3000));
         if (isDownloadingRef.current) return;
@@ -1653,7 +1258,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }, 1500);
 
     return () => clearTimeout(delayDebounce);
-  }, [drivers, officials, cars, violations, invoices, invoiceItems, auditLogs, movements, custodyAccounts, custodyMovements, adminPassword, managerPassword, companies, hiddenCompanies]);
+  }, [drivers, officials, cars, violations, invoices, invoiceItems, auditLogs, movements, custodyAccounts, custodyMovements, companies, hiddenCompanies]);
 
   // Network jitter simulation
   useEffect(() => {
@@ -2065,24 +1670,12 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           r => ({ ...r, interval_km: num0(r.interval_km), last_done_km: r.last_done_km === null || r.last_done_km === undefined ? undefined : num0(r.last_done_km), last_done_date: r.last_done_date ? String(r.last_done_date).slice(0, 10) : undefined, note: r.note || undefined }));
       }
 
-      // Safe separate fetch for system settings / admin & manager passwords so it doesn't block the core tables
+      // إعدادات النظام (من غير أي أسرار — كلمات السر والمستخدمين بقوا في Auth/profiles)، وقايمة المستخدمين من profiles
       try {
+        refreshSystemUsers();
         const { data, error } = await supabase.from('system_settings').select('*');
         if (!error && data) {
-          // لو السحابة مفيهاش قايمة مستخدمين خالص (مثلاً اتحفظت محلي بس زمان)، نرفع النسخة اللي في الجهاز
-          // مرة واحدة عشان باقي الأجهزة تقدر تدخل بنفس المستخدمين
-          if (!data.some(r => r.key === 'system_users' && r.value) && systemUsersPersistedRef.current && systemUsersRef.current.length > 0) {
-            commitSystemUsers<void>(base => ({ next: base }));
-          }
           data.forEach(row => {
-            if (row.key === 'admin_password' && row.value) {
-              _setAdminPassword(row.value);
-              localStorage.setItem('elbanna_admin_password', row.value);
-            }
-            if (row.key === 'manager_password' && row.value) {
-              _setManagerPassword(row.value);
-              localStorage.setItem('elbanna_manager_password', row.value);
-            }
             if (row.key === 'companies' && row.value) {
               try {
                 const parsed = JSON.parse(row.value);
@@ -2115,30 +1708,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
               } catch (e) {
                 console.warn("Parse farms JSON error", e);
               }
-            }
-            if (row.key === 'movement_supervisor_password' && row.value) {
-              _setMovementSupervisorPassword(row.value);
-              localStorage.setItem('elbanna_movement_supervisor_password', row.value);
-            }
-            if (row.key === 'requests_agent_password' && row.value) {
-              _setRequestsAgentPassword(row.value);
-              localStorage.setItem('elbanna_requests_agent_password', row.value);
-            }
-            if (row.key === 'admin_username' && row.value) {
-              _setAdminUsername(row.value);
-              localStorage.setItem('elbanna_admin_username', row.value);
-            }
-            if (row.key === 'manager_username' && row.value) {
-              _setManagerUsername(row.value);
-              localStorage.setItem('elbanna_manager_username', row.value);
-            }
-            if (row.key === 'movement_supervisor_username' && row.value) {
-              _setMovementSupervisorUsername(row.value);
-              localStorage.setItem('elbanna_movement_supervisor_username', row.value);
-            }
-            if (row.key === 'requests_agent_username' && row.value) {
-              _setRequestsAgentUsername(row.value);
-              localStorage.setItem('elbanna_requests_agent_username', row.value);
             }
             if (row.key === 'official_custom_screens' && row.value) {
               try {
@@ -2236,18 +1805,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 }
               } catch (e) {
                 console.warn("Parse car_monthly_costs JSON error", e);
-              }
-            }
-            if (row.key === 'system_users' && row.value) {
-              try {
-                const parsed = JSON.parse(row.value);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                  const merged = mergeNewScreensIntoAdminUser(parsed);
-                  setSystemUsers(merged);
-                  localStorage.setItem('elbanna_system_users', JSON.stringify(merged));
-                }
-              } catch (e) {
-                console.warn("Parse system_users JSON error", e);
               }
             }
             if (row.key === 'role_permissions' && row.value) {
@@ -2627,11 +2184,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
           { key: 'deleted_ids', value: JSON.stringify(tombstonesRef.current) }
         ];
         await supabase.from('system_settings').upsert(settingsToUpsert);
-        // كلمات المرور القديمة (نص عادي) ماعادتش مستخدمة في الدخول — نمسحها من السحابة طالما جدول المستخدمين الموحّد موجود
-        const { data: unifiedUsersRow } = await supabase.from('system_settings').select('key').eq('key', 'system_users').maybeSingle();
-        if (unifiedUsersRow) {
-          await supabase.from('system_settings').delete().in('key', ['admin_password', 'manager_password', 'movement_supervisor_password', 'requests_agent_password']);
-        }
       } catch (settingsUpsertError) {
         console.warn("Supabase upsert system_settings error:", settingsUpsertError);
       }
@@ -2725,11 +2277,17 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   // تنظيف البيانات الوهمية وتنزيل السحابة عند الفتح
   useEffect(() => {
     cleanupMockData();
-    const client = getSupabaseClient();
-    if (client) {
-      downloadCloudDataToLocal();
-    }
   }, []);
+
+  // تنزيل السحابة بعد تسجيل الدخول (الجداول مقفولة بـ RLS قبله) — وعند فتح التطبيق لو فيه جلسة محفوظة
+  const syncedForUserRef = useRef<string | null>(null);
+  useEffect(() => {
+    const uid = currentUser ? (currentUser.systemUserId || currentUser.username) : null;
+    if (!uid) { syncedForUserRef.current = null; return; }
+    if (syncedForUserRef.current === uid) return;
+    syncedForUserRef.current = uid;
+    if (getSupabaseClient()) downloadCloudDataToLocal();
+  }, [currentUser]);
 
   // مزامنة خفيفة لطلبات النقل: سحب من السحابة كل 15 ثانية وعند رجوع الشاشة للواجهة، ورفع أي طلب محلي ناقص
   // (عشان طلب اتسجل من تطبيق الموبايل يظهر في الموقع من غير ريفرش، والعكس)
@@ -2740,7 +2298,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (!client) return;
     let busy = false;
     const sync = async () => {
-      if (busy || isDownloadingRef.current || document.visibilityState === 'hidden') return;
+      if (busy || !currentUserRef.current || isDownloadingRef.current || document.visibilityState === 'hidden') return;
       busy = true;
       try {
         const { data, error } = await client.from('transport_requests').select('*').order('request_number', { ascending: false });
@@ -3374,8 +2932,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     setCustodyAccounts(prev => prev.filter(ca => ca.official_id !== id));
 
     // أي مستخدم كان مربوط بالمشرف المحذوف بنفك ارتباطه (المستخدم نفسه بيفضل موجود)
-    if (systemUsersRef.current.some(u => u.linked_official_id === id)) {
-      commitSystemUsers<void>(base => ({ next: base.map(u => u.linked_official_id === id ? { ...u, linked_official_id: undefined } : u) }));
+    const linkedToGone = systemUsersRef.current.filter(u => u.linked_official_id === id);
+    if (linkedToGone.length > 0) {
+      Promise.all(linkedToGone.map(u => callAdminUsers({ action: 'update', id: u.id, linked_official_id: null }))).then(() => refreshSystemUsers());
     }
 
     if (officialCustomScreens[id]) {
@@ -3475,38 +3034,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
-  // تخزين هاش الباسورد في حساب المسؤول (داخلي)
-  const setOfficialPasswordHash = (id: string, stored: string) => {
-    let updatedParent: Official | undefined;
-    setOfficials(prev => prev.map(o => {
-      if (o.id === id) {
-        updatedParent = {
-          ...o,
-          password: stored
-        };
-        return updatedParent;
-      }
-      return o;
-    }));
-
-    const supabase = getSupabaseClient();
-    if (supabase && isCloudConnected && updatedParent) {
-      supabase.from('officials').update({
-        password: stored
-      }).eq('id', id).then(({ error }) => {
-        if (error) console.error("Supabase update official password error:", error);
-      });
-    }
-  };
-
-  // تغيير باسورد مسؤول: بيتشفّر، وبيتزامن مع باسورد الدخول للمستخدم المربوط بيه
-  const updateOfficialPassword = (id: string, newPassword: string) => {
-    const stored = isHashedPassword(newPassword) ? newPassword : hashPassword(newPassword);
-    setOfficialPasswordHash(id, stored);
-    const linked = systemUsers.find(u => u.linked_official_id === id);
-    if (linked) {
-      commitSystemUsers<void>(base => ({ next: base.map(u => u.id === linked.id ? { ...u, password: stored } : u) }));
-    }
+  // تغيير كلمة سر مسؤول (من الأدمن): الدخول بقى عبر Supabase Auth، فبنغيّرها على المستخدم المربوط بالمسؤول
+  // من خلال Edge Function. مفيش كلمات سر بتتخزن على جدول officials تاني.
+  const updateOfficialPassword = async (id: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    const linked = systemUsersRef.current.find(u => u.linked_official_id === id);
+    if (!linked) return { success: false, error: 'المسؤول ده مالوش مستخدم دخول مربوط — اربطه من شاشة المستخدمين الأول.' };
+    const res = await updateSystemUser(linked.id, { password: newPassword });
+    return { success: res.success, error: res.error };
   };
 
   // تغيير اسم مشرف الصرف (اسم المستخدم الظاهر بالنظام)
@@ -5290,6 +4824,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         deleteOfficial,
         updateCustody,
         updateOfficialPassword,
+        changeOwnPassword,
+        provisionSystemUsers,
         updateOfficialName,
         addCustodyAccount,
         addCustodyFunds,
@@ -5369,7 +4905,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         importLocalBackup,
         exportCloudBackup,
         currentUser,
-        login,
         loginAuto,
         hasScreenPermission,
         notifications: myNotifications,
@@ -5380,22 +4915,6 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         pendingNav,
         consumeNav,
         logout,
-        adminPassword,
-        managerPassword,
-        movementSupervisorPassword,
-        requestsAgentPassword,
-        updateAdminPassword,
-        updateManagerPassword,
-        updateMovementSupervisorPassword,
-        updateRequestsAgentPassword,
-        adminUsername,
-        managerUsername,
-        movementSupervisorUsername,
-        requestsAgentUsername,
-        updateAdminUsername,
-        updateManagerUsername,
-        updateMovementSupervisorUsername,
-        updateRequestsAgentUsername,
         officialCustomScreens,
         updateOfficialScreens
       }}

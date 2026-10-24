@@ -95,7 +95,11 @@ export interface DbContextType {
   // Official (Custody) Actions
   addOfficial: (official: Omit<Official, 'id'>) => Official;
   updateCustody: (id: string, cashDelta: number, visaDelta: number) => void;
-  updateOfficialPassword: (id: string, newPassword: string) => void;
+  updateOfficialPassword: (id: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  // تغيير كلمة سر المستخدم الحالي بنفسه (بيتأكد من الحالية الأول)
+  changeOwnPassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  // تفعيل دخول المستخدمين المنقولين من النظام القديم (أدمن): بيرجّع كلمة سر مؤقتة لكل واحد مرة واحدة
+  provisionSystemUsers: () => Promise<{ success: boolean; error?: string; results: Array<{ id: string; username: string; display_name: string; password?: string; error?: string }> }>;
   updateOfficialName: (id: string, newName: string) => void;
   deleteOfficial: (id: string) => void;
 
@@ -166,8 +170,8 @@ export interface DbContextType {
   // نظام المستخدمين الموحّد — شاشة واحدة، كل مستخدم بشاشاته الخاصة من غير ارتباط بقسم/رتبة
   systemUsers: SystemUser[];
   addSystemUser: (username: string, password: string, displayName: string, allowedScreens: string[]) => Promise<{ success: boolean; error?: string; user?: SystemUser; cloudSaved: boolean }>;
-  updateSystemUser: (id: string, updates: { username?: string; password?: string; display_name?: string; official_name?: string; allowed_screens?: string[] }) => Promise<{ success: boolean; error?: string; cloudSaved: boolean }>;
-  deleteSystemUser: (id: string) => Promise<{ success: boolean; cloudSaved: boolean }>;
+  updateSystemUser: (id: string, updates: { username?: string; password?: string; display_name?: string; official_name?: string; allowed_screens?: string[]; active?: boolean }) => Promise<{ success: boolean; error?: string; cloudSaved: boolean }>;
+  deleteSystemUser: (id: string) => Promise<{ success: boolean; error?: string; cloudSaved: boolean }>;
   // إنشاء حساب عهدة (مشرف صرف) يدويًا لمستخدم موجود — مش تلقائي
   createOfficialForUser: (userId: string, initial?: { cash_custody?: number; visa_custody?: number }) => Promise<{ success: boolean; error?: string; official?: Official; cloudSaved: boolean }>;
   // آخر خطأ في حفظ المستخدمين بالسحابة (null لو تمام)
@@ -222,7 +226,6 @@ export interface DbContextType {
 
   // Authentication states
   currentUser: User | null;
-  login: (username: string, role: 'admin' | 'manager' | 'supervisor' | 'movement_supervisor' | 'requests_agent', password?: string, officialId?: string) => Promise<{ success: boolean; error?: string }>;
   // تسجيل دخول موحّد بدون اختيار قسم مقدمًا — اسم مستخدم وكلمة مرور بس، والنظام يتعرف على الحساب تلقائيًا
   loginAuto: (identifier: string, password: string) => Promise<{ success: boolean; error?: string }>;
   hasScreenPermission: (screenId: string) => boolean;
@@ -237,23 +240,6 @@ export interface DbContextType {
   pendingNav: { screen: string; entityType: 'transport' | 'maintenance'; entityId: string; nonce: number } | null;
   consumeNav: (nonce: number) => void;
   logout: () => void;
-  adminPassword?: string;
-  managerPassword?: string;
-  movementSupervisorPassword?: string;
-  requestsAgentPassword?: string;
-  updateAdminPassword?: (newPass: string) => void;
-  updateManagerPassword?: (newPass: string) => void;
-  updateMovementSupervisorPassword?: (newPass: string) => void;
-  updateRequestsAgentPassword?: (newPass: string) => void;
-  // أسماء المستخدمين القابلة للتعديل لكل حساب (بدل الاسم الثابت المقفول قديمًا)
-  adminUsername: string;
-  managerUsername: string;
-  movementSupervisorUsername: string;
-  requestsAgentUsername: string;
-  updateAdminUsername: (newUsername: string) => void;
-  updateManagerUsername: (newUsername: string) => void;
-  updateMovementSupervisorUsername: (newUsername: string) => void;
-  updateRequestsAgentUsername: (newUsername: string) => void;
   // شاشات مخصصة لكل مشرف صرف بعينه (official) — غير مرتبطة بالرتبة المشتركة، تسمح بإضافة
   // أي مستخدم وتحديد شاشاته الخاصة بدل التقييد بقسم ثابت. المفتاح official.id.
   officialCustomScreens: Record<string, string[]>;

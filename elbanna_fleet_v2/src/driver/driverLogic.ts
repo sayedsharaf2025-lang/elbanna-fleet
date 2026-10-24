@@ -32,10 +32,10 @@ export const normalizeDriverCode = (code: string): string =>
 export const normalizePin = (pin: string): string =>
   (pin || '').replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\s/g, '');
 
-// الرقم السري: أرقام فقط من 4 لـ 8
+// الرقم السري: أرقام فقط من 6 لـ 8
 export function validatePin(pin: string): string | null {
   const p = normalizePin(pin);
-  if (!/^\d{4,8}$/.test(p)) return 'الرقم السري لازم يكون أرقام فقط من 4 إلى 8 خانات.';
+  if (!/^\d{6,8}$/.test(p)) return 'الرقم السري لازم يكون أرقام فقط من 6 إلى 8 خانات.';
   return null;
 }
 

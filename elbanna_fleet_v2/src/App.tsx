@@ -334,6 +334,7 @@ function DashboardLayout() {
 
             <BackupButton />
 
+            {db.currentUser?.role === 'admin' && (<>
             {/* Quick Developer Supabase trigger */}
             <button
               onClick={() => setShowConsole(!showConsole)}
@@ -359,6 +360,7 @@ function DashboardLayout() {
             >
               <RefreshCw className="w-4 h-4" />
             </button>
+            </>)}
           </div>
         </div>
       </header>
@@ -565,7 +567,7 @@ function DashboardLayout() {
       </footer>
 
       {/* Toggleable Supabase Developer Console panel */}
-      {showConsole && (
+      {db.currentUser?.role === 'admin' && showConsole && (
         <div className="fixed bottom-10 left-0 right-0 z-50 p-4 bg-slate-950 border-t border-slate-800 shadow-2xl max-h-[50vh] overflow-y-auto no-print">
           <div className="max-w-7xl mx-auto">
             <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-800 text-xs">

@@ -16,8 +16,9 @@ test('الأرقام العربية والفواصل', () => {
   assert.equal(parseDriverNumber('-5'), undefined);
 });
 
-test('الرقم السري 4 إلى 8 أرقام', () => {
-  assert.equal(validatePin('1234'), null);
+test('الرقم السري 6 إلى 8 أرقام', () => {
+  assert.equal(validatePin('123456'), null);
+  assert.notEqual(validatePin('1234'), null);
   assert.equal(validatePin('١٢٣٤٥٦'), null);
   assert.notEqual(validatePin('123'), null);
   assert.notEqual(validatePin('123456789'), null);

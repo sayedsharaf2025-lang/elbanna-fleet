@@ -1,13 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { handleDriverApi } from '../supabase/functions/_shared/driverApiHandler.ts';
+import { signDriverToken, verifyDriverToken } from '../supabase/functions/_shared/driverToken.ts';
+import { startTripPatch } from '../src/db/logic/tripFlow';
 
-// ذاكرة وهمية لـ localStorage (supabaseClient بيقراها) — لازم تتعمل قبل استيراد الـ API
-(globalThis as any).localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
-(globalThis as any).self = globalThis; // generateId بيستخدم self.crypto (متوفر في المتصفح بس)
-
-const { loginDriver, fetchTrips, applyTripAction, fetchLastOdometer, verifySession, __setClientForTests } = await import('../src/driver/driverApi');
-const { hashPassword } = await import('../src/db/passwordUtil');
-const { startTripPatch } = await import('../src/db/logic/tripFlow');
+const SECRET = 'x'.repeat(40);
+const NOW = new Date('2026-10-20T08:00:00.000Z');
 
 // قاعدة بيانات وهمية بسيطة تدعم السلاسل اللي بيستخدمها التطبيق
 function makeFake(tables: Record<string, any[]>) {
@@ -47,97 +45,143 @@ function makeFake(tables: Record<string, any[]>) {
       upsert: (list: any[]) => { list.forEach(n => { const i = rows().findIndex(r => r.id === n.id); if (i >= 0) rows()[i] = n; else rows().push(n); }); return Promise.resolve({ error: null }); },
     };
   };
-  return { from };
+  return { from } as any;
 }
+
 
 const driver = { id: 'd1', driver_code: 'D-7', name: 'محمد' };
 const baseTrip = () => ({ id: 'r1', request_number: '2610-0001', requester_name: 'أحمد', farm_name: 'مزرعة أ', destinations: ['مصنع ب'], status: 'in_progress', assigned_car_id: 'c1', assigned_driver_id: 'd1', responded_at: '2026-10-20T06:00:00.000Z', ...startTripPatch('2026-10-20T06:00:00.000Z') });
 
-function setup(extra: Record<string, any[]> = {}) {
+// حالة وهمية لدوال قاعدة البيانات (driver_verify_pin / driver_access_version)
+function setup(extra: Record<string, any[]> = {}, pins: Record<string, string> = { d1: '123456' }) {
   const tables: Record<string, any[]> = {
     drivers: [{ ...driver }, { id: 'd2', driver_code: 'D-8', name: 'علي' }],
-    driver_app_access: [{ driver_id: 'd1', pin_hash: hashPassword('123456') }],
     cars: [{ id: 'c1', car_number: 'ر س ب 1' }],
     transport_requests: [baseTrip()],
     notifications: [],
     ...extra,
   };
-  __setClientForTests(makeFake(tables));
-  return tables;
+  const state = { pins, versions: { d1: 1, d2: 1 } as Record<string, number>, fails: {} as Record<string, number>, rpcCalls: 0 };
+  const fake: any = makeFake(tables);
+  fake.rpc = async (fn: string, args: any) => {
+    state.rpcCalls++;
+    if (fn === 'driver_access_version') return { data: state.pins[args.p_driver_id] ? state.versions[args.p_driver_id] : null, error: null };
+    if (fn === 'driver_verify_pin') {
+      const id = args.p_driver_id;
+      if ((state.fails[id] || 0) >= 5) return { data: { ok: false, locked_seconds: 30 }, error: null };
+      if (state.pins[id] && state.pins[id] === args.p_pin) { state.fails[id] = 0; return { data: { ok: true, pv: state.versions[id] }, error: null }; }
+      state.fails[id] = (state.fails[id] || 0) + 1;
+      return { data: { ok: false }, error: null };
+    }
+    return { data: null, error: { message: 'unknown rpc' } };
+  };
+  return { tables, state, call: async (body: any) => {
+    const res = await handleDriverApi(new Request('https://x.test/driver-api', { method: 'POST', body: JSON.stringify(body) }), { db: fake, secret: SECRET, now: () => NOW });
+    return res.json() as Promise<any>;
+  } };
 }
 
-test('الدخول: كود + رقم سري صح، وأخطاء واضحة', async () => {
-  setup();
-  const ok = await loginDriver(' D-7 ', '١٢٣٤٥٦');
+const login = async (s: ReturnType<typeof setup>, code = 'D-7', pin = '123456') => s.call({ action: 'login', code, pin });
+
+test('الدخول: كود + رقم سري صح، وأخطاء عامة من غير كشف', async () => {
+  const s = setup();
+  const ok = await login(s, ' d-7 ', '١٢٣٤٥٦');
   assert.equal(ok.ok, true);
-  assert.equal(ok.data?.name, 'محمد');
-  assert.equal((await loginDriver('d-7', '123456')).ok, true); // مش حساس لحالة الحروف
-  assert.equal((await loginDriver('D-7', '000000')).ok, false);
-  assert.equal((await loginDriver('X-1', '123456')).ok, false);
-  const noPin = await loginDriver('D-8', '123456');
-  assert.equal(noPin.ok, false);
-  assert.match(noPin.error || '', /رقم سري/);
-  assert.equal((await loginDriver('', '')).ok, false);
+  assert.equal(ok.data.name, 'محمد');
+  assert.ok(ok.data.token);
+  const bad = await login(s, 'D-7', '000000');
+  const noUser = await login(s, 'X-1', '123456');
+  const noPin = await login(s, 'D-8', '123456');
+  for (const r of [bad, noUser, noPin]) { assert.equal(r.ok, false); assert.match(r.error, /غير صحيح/); }
+  assert.equal((await login(s, '', '')).ok, false);
+  assert.equal((await login(s, 'D-7', 'abcdef')).ok, false);
 });
 
-test('التحقق من استمرار صلاحية الدخول', async () => {
-  const t = setup();
-  assert.equal((await verifySession({ id: 'd1', code: 'D-7', name: 'محمد' })).data, true);
-  t.driver_app_access.length = 0;
-  assert.equal((await verifySession({ id: 'd1', code: 'D-7', name: 'محمد' })).data, false);
+test('القفل بعد محاولات خاطئة بيجي من السيرفر', async () => {
+  const s = setup();
+  for (let i = 0; i < 5; i++) await login(s, 'D-7', '000000');
+  const locked = await login(s, 'D-7', '123456');
+  assert.equal(locked.ok, false);
+  assert.equal(locked.locked_seconds, 30);
 });
 
-test('رحلات السائق: الجارية والمنتهية وأرقام السيارات', async () => {
-  setup({ transport_requests: [baseTrip(), { ...baseTrip(), id: 'other', assigned_driver_id: 'd2' }, { ...baseTrip(), id: 'old', status: 'done', trip_status: 'finished', delivered_at: '2026-10-19T10:00:00.000Z', finish_odometer: 500 }] });
-  const res = await fetchTrips('d1');
-  assert.equal(res.ok, true);
-  assert.deepEqual(res.data!.open.map(t => t.id), ['r1']);
-  assert.deepEqual(res.data!.recent.map(t => t.id), ['old']);
-  assert.equal(res.data!.cars['c1'], 'ر س ب 1');
-  assert.equal(await fetchLastOdometer('c1', 'r1'), 500);
+test('بدون توكن أو بتوكن مزوّر أو منتهي: الجلسة بتبطل', async () => {
+  const s = setup();
+  assert.equal((await s.call({ action: 'trips' })).code, 'session_invalid');
+  const real = (await login(s)).data.token as string;
+  const forged = real.split('.')[0] + '.' + 'A'.repeat(43);
+  assert.equal((await s.call({ action: 'trips', token: forged })).code, 'session_invalid');
+  const expired = await signDriverToken(SECRET, { sub: 'd1', pv: 1, exp: Math.floor(NOW.getTime() / 1000) - 10 });
+  assert.equal((await s.call({ action: 'trips', token: expired })).code, 'session_invalid');
+  const otherSecret = await signDriverToken('y'.repeat(40), { sub: 'd1', pv: 1, exp: Math.floor(NOW.getTime() / 1000) + 1000 });
+  assert.equal((await s.call({ action: 'trips', token: otherSecret })).code, 'session_invalid');
+});
+
+test('تغيير الرقم السري أو إلغاء الدخول بيبطّل التوكن فورًا', async () => {
+  const s = setup();
+  const token = (await login(s)).data.token;
+  assert.equal((await s.call({ action: 'verify', token })).ok, true);
+  s.state.versions.d1 = 2; // المكتب غيّر الرقم
+  assert.equal((await s.call({ action: 'verify', token })).code, 'session_invalid');
+  s.state.versions.d1 = 1;
+  delete s.state.pins.d1; // إلغاء الدخول
+  assert.equal((await s.call({ action: 'verify', token })).code, 'session_invalid');
+});
+
+test('رحلات السائق: الجارية والمنتهية، ومفيش وصول لرحلات غيره', async () => {
+  const s = setup({ transport_requests: [baseTrip(), { ...baseTrip(), id: 'other', assigned_driver_id: 'd2' }, { ...baseTrip(), id: 'old', status: 'done', trip_status: 'finished', delivered_at: '2026-10-19T10:00:00.000Z', finish_odometer: 500 }] });
+  const token = (await login(s)).data.token;
+  const res = await s.call({ action: 'trips', token });
+  assert.deepEqual(res.data.open.map((t: any) => t.id), ['r1']);
+  assert.deepEqual(res.data.recent.map((t: any) => t.id), ['old']);
+  assert.equal(res.data.cars.c1, 'ر س ب 1');
+  assert.equal((await s.call({ action: 'last_odometer', token, carId: 'c1', excludeId: 'r1' })).data, 500);
+  assert.equal((await s.call({ action: 'last_odometer', token, carId: 'c9' })).data, null);
+  const foreign = await s.call({ action: 'trip_action', token, tripId: 'other', action_name: 'accept' });
+  assert.equal(foreign.ok, false);
+  assert.match(foreign.error, /مش على حسابك/);
 });
 
 test('الرحلة كاملة من القبول للانتهاء وإشعارات المكتب', async () => {
-  const t = setup();
-  const me = { id: 'd1', code: 'D-7', name: 'محمد' };
-  const steps: Array<[any, any?]> = [['accept'], ['arrive_pickup'], ['load'], ['arrive_destination'], ['head_garage'], ['finish', { odometer: 120500, expectedSmoke: 850 }]];
-  for (const [action, payload] of steps) {
-    const trip: any = (await fetchTrips('d1')).data!.open[0];
-    const res = await applyTripAction(trip, action, payload || {}, me, 'ر س ب 1', '2026-10-20');
-    assert.equal(res.ok, true, `${action}: ${res.error}`);
+  const s = setup();
+  const token = (await login(s)).data.token;
+  const steps: Array<[string, any?]> = [['accept'], ['arrive_pickup'], ['load'], ['arrive_destination'], ['head_garage'], ['finish', { odometer: 120500, expectedSmoke: 850 }]];
+  for (const [action_name, payload] of steps) {
+    const res = await s.call({ action: 'trip_action', token, tripId: 'r1', action_name, payload });
+    assert.equal(res.ok, true, `${action_name}: ${res.error}`);
   }
-  const row = t.transport_requests[0];
+  const row = s.tables.transport_requests[0];
   assert.equal(row.trip_status, 'finished');
   assert.equal(row.status, 'done');
   assert.equal(row.finish_odometer, 120500);
   assert.equal(row.expected_smoke, 850);
   assert.equal(row.execution_date, '2026-10-20');
   assert.deepEqual(row.trip_log.map((e: any) => e.status), ['assigned', 'accepted', 'at_pickup', 'loaded', 'at_destination', 'heading_garage', 'finished']);
-  // إشعارين للمكتب: القبول والانتهاء
-  assert.deepEqual(t.notifications.map((n: any) => n.kind), ['transport_trip_accepted', 'transport_trip_finished']);
-  assert.equal(t.notifications[1].created_by, 'محمد');
-  assert.deepEqual(t.notifications[1].read_by, []);
-  assert.ok(t.notifications[1].target_screens.includes('route_accounting'));
+  assert.deepEqual(s.tables.notifications.map((n: any) => n.kind), ['transport_trip_accepted', 'transport_trip_finished']);
+  assert.equal(s.tables.notifications[1].created_by, 'محمد');
 });
 
-test('تعارض: لو المكتب غيّر الحالة في نفس اللحظة الخطوة بتترفض', async () => {
-  const t = setup();
-  const staleTrip: any = (await fetchTrips('d1')).data!.open[0]; // assigned
-  t.transport_requests[0].trip_status = 'accepted'; // اتغيّرت من مكان تاني
-  const res = await applyTripAction(staleTrip, 'accept', {}, { id: 'd1', code: 'D-7', name: 'محمد' }, 'x', '2026-10-20');
-  assert.equal(res.ok, false);
-  assert.match(res.error || '', /اتغيّر/);
-  assert.equal(t.transport_requests[0].trip_status, 'accepted');
+test('خطوة مش في ترتيبها أو إنهاء بدون عداد أو عملية مجهولة بتترفض', async () => {
+  const s = setup();
+  const token = (await login(s)).data.token;
+  assert.equal((await s.call({ action: 'trip_action', token, tripId: 'r1', action_name: 'load' })).ok, false);
+  assert.equal((await s.call({ action: 'trip_action', token, tripId: 'r1', action_name: 'hack' })).ok, false);
+  s.tables.transport_requests[0].trip_status = 'heading_garage';
+  assert.equal((await s.call({ action: 'trip_action', token, tripId: 'r1', action_name: 'finish', payload: { odometer: -5 } })).ok, false);
+  assert.equal(s.tables.transport_requests[0].status, 'in_progress');
+  assert.equal(s.tables.notifications.length, 0);
 });
 
-test('خطوة مش في ترتيبها أو إنهاء بدون عداد بيترفضوا قبل أي كتابة', async () => {
-  const t = setup();
-  const trip: any = (await fetchTrips('d1')).data!.open[0];
-  const me = { id: 'd1', code: 'D-7', name: 'محمد' };
-  assert.equal((await applyTripAction(trip, 'load', {}, me, 'x', '2026-10-20')).ok, false);
-  const heading = { ...trip, trip_status: 'heading_garage' };
-  t.transport_requests[0].trip_status = 'heading_garage';
-  assert.equal((await applyTripAction(heading, 'finish', { odometer: 100 }, me, 'x', '2026-10-20')).ok, false);
-  assert.equal(t.transport_requests[0].status, 'in_progress');
-  assert.equal(t.notifications.length, 0);
+test('السر قصير أو ناقص: الدالة بترفض الشغل', async () => {
+  const res = await handleDriverApi(new Request('https://x.test', { method: 'POST', body: '{"action":"login"}' }), { db: {}, secret: 'short' });
+  assert.equal((await res.json() as any).ok, false);
+});
+
+test('توكن السائق: توقيع وتحقق وانتهاء', async () => {
+  const exp = Math.floor(NOW.getTime() / 1000) + 100;
+  const t = await signDriverToken(SECRET, { sub: 'd1', pv: 3, exp });
+  assert.deepEqual(await verifyDriverToken(SECRET, t, NOW.getTime()), { sub: 'd1', pv: 3, exp });
+  assert.equal(await verifyDriverToken(SECRET, t, NOW.getTime() + 200_000), null);
+  assert.equal(await verifyDriverToken(SECRET, t + 'x', NOW.getTime()), null);
+  assert.equal(await verifyDriverToken(SECRET, 12345, NOW.getTime()), null);
 });

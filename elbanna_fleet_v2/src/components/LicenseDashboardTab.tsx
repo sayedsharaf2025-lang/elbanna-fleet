@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { escapeHtml } from '../utils/escapeHtml';
 import React, { useState } from 'react';
 import { useDb } from '../db/store';
 import { Car } from '../types';
@@ -336,7 +337,7 @@ export const LicenseDashboardTab: React.FC = () => {
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8"/>
-<title>فاتورة ترخيص - ${car.car_number}</title>
+<title>فاتورة ترخيص - ${escapeHtml(car.car_number)}</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -367,27 +368,27 @@ export const LicenseDashboardTab: React.FC = () => {
   <div class="header">
     <h1>🚗 فاتورة ترخيص سيارة — شركة البنا</h1>
     <h2>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')}</h2>
-    <div class="car-plate">${car.car_number}</div><br/>
+    <div class="car-plate">${escapeHtml(car.car_number)}</div><br/>
     <span class="status-badge ${licStatus.label.includes('منتهي') ? 'status-expired' : licStatus.label.includes('قريب') ? 'status-near' : 'status-valid'}">${licStatus.label}</span>
   </div>
 
   <div class="section-title">بيانات السيارة الأساسية</div>
   <table>
-    <tr><td class="label">رقم اللوحة</td><td class="value">${car.car_number}</td></tr>
-    <tr><td class="label">الشركة المالكة</td><td class="value">${car.owner_company || '—'}</td></tr>
-    <tr><td class="label">نوع السيارة</td><td class="value">${car.car_type || '—'}</td></tr>
-    <tr><td class="label">الماركة / الموديل</td><td class="value">${car.brand || '—'} / ${car.model || '—'}</td></tr>
-    <tr><td class="label">رقم الشاسيه</td><td class="value font-mono">${car.chassis_number || '—'}</td></tr>
-    <tr><td class="label">رقم الموتور</td><td class="value font-mono">${car.motor_number || '—'}</td></tr>
+    <tr><td class="label">رقم اللوحة</td><td class="value">${escapeHtml(car.car_number)}</td></tr>
+    <tr><td class="label">الشركة المالكة</td><td class="value">${escapeHtml(car.owner_company || '—')}</td></tr>
+    <tr><td class="label">نوع السيارة</td><td class="value">${escapeHtml(car.car_type || '—')}</td></tr>
+    <tr><td class="label">الماركة / الموديل</td><td class="value">${escapeHtml(car.brand || '—')} / ${escapeHtml(car.model || '—')}</td></tr>
+    <tr><td class="label">رقم الشاسيه</td><td class="value font-mono">${escapeHtml(car.chassis_number || '—')}</td></tr>
+    <tr><td class="label">رقم الموتور</td><td class="value font-mono">${escapeHtml(car.motor_number || '—')}</td></tr>
   </table>
 
   <div class="section-title">بيانات الترخيص والتأمين</div>
   <table>
-    <tr><td class="label">تاريخ انتهاء الترخيص</td><td class="value" style="color:${licStatus.label.includes('منتهي') ? '#dc2626' : '#059669'}">${car.license_end_date || '—'}</td></tr>
-    <tr><td class="label">إدارة / جهة المرور</td><td class="value">${car.traffic_office || '—'}</td></tr>
-    <tr><td class="label">موقف التأمين</td><td class="value">${car.insurance_status || '—'}</td></tr>
-    <tr><td class="label">مشرف الترخيص</td><td class="value">${supervisorObj ? supervisorObj.name : 'غير مكلف'}</td></tr>
-    <tr><td class="label">السائق المكلف</td><td class="value">${driverObj ? driverObj.name : 'غير مكلف'}</td></tr>
+    <tr><td class="label">تاريخ انتهاء الترخيص</td><td class="value" style="color:${licStatus.label.includes('منتهي') ? '#dc2626' : '#059669'}">${escapeHtml(car.license_end_date || '—')}</td></tr>
+    <tr><td class="label">إدارة / جهة المرور</td><td class="value">${escapeHtml(car.traffic_office || '—')}</td></tr>
+    <tr><td class="label">موقف التأمين</td><td class="value">${escapeHtml(car.insurance_status || '—')}</td></tr>
+    <tr><td class="label">مشرف الترخيص</td><td class="value">${escapeHtml(supervisorObj ? supervisorObj.name : 'غير مكلف')}</td></tr>
+    <tr><td class="label">السائق المكلف</td><td class="value">${escapeHtml(driverObj ? driverObj.name : 'غير مكلف')}</td></tr>
     <tr><td class="label">حالة الطفاية</td><td class="value">${car.extinguisher_status === 'valid' ? '✅ سليمة' : car.extinguisher_status === 'warning' ? '⚠️ تحذير' : '❌ منتهية'}</td></tr>
   </table>
 

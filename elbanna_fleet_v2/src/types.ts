@@ -16,10 +16,11 @@ export interface User {
 export interface SystemUser {
   id: string; // UUID
   username: string; // اسم المستخدم لتسجيل الدخول (فريد، قابل للتعديل بالكامل)
-  password: string; // كلمة المرور
   display_name: string; // الاسم الظاهر بالنظام (مثال: "أحمد - مدير التقارير")
   role_tag: 'admin' | 'manager' | 'movement_supervisor' | 'requests_agent' | 'custom'; // تصنيف داخلي فقط (مايظهرش للأدمن)، لأغراض فلترة بيانات العهدة القديمة فقط
   allowed_screens: string[]; // الشاشات المخصصة لهذا المستخدم تحديدًا — مش موروثة من قسم
+  active?: boolean; // الحساب فعّال؟ (الأدمن يقدر يوقفه)
+  has_login?: boolean; // اتفعّل له دخول في Supabase Auth؟ (المنقولين من النظام القديم لسه)
   linked_official_id?: string; // لو المستخدم ده عنده صلاحية "فواتير تراخيص"، بيتربط تلقائيًا بحساب عهدة (Official) بنفس المعرّف ده
 }
 
@@ -38,7 +39,7 @@ export interface Official {
   name: string; // اسم المشرف/المسؤول
   cash_custody: number; // عهدة نقدي
   visa_custody: number; // عهدة فيزا
-  password?: string; // كلمة المرور
+  password?: string; // (قديم — مابيتخزنش تاني؛ الدخول عبر Supabase Auth)
   allowed_screens?: string[]; // شاشات مخصصة لهذا المشرف تحديدًا؛ لو فاضية بيرجع لإعدادات رتبة "مشرف صرف" الافتراضية
 }
 

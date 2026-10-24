@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useDb } from '../db/store';
-import { isHashedPassword } from '../db/passwordUtil';
 import {
   Users,
   UserPlus,
   UserMinus,
   Key,
-  Eye,
-  EyeOff,
+  Copy,
+  Ban,
+  Power,
   ShieldCheck,
   AlertTriangle,
   CheckCircle,
@@ -69,7 +69,6 @@ export function UsersSettingsTab() {
     setNewName(''); setNewUsername(''); setNewPassword(''); setNewScreens([]); setShowAddForm(false);
   };
 
-  const cloudWarn = ' ⚠️ اتحفظ على الجهاز ده بس ولسه ماوصلش للسحابة — تأكد من الإنترنت وجرّب تاني قبل ما يدخل من جهاز تاني.';
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,8 +81,8 @@ export function UsersSettingsTab() {
       showNotification('error', res.error || 'تعذّر إضافة المستخدم');
       return;
     }
-    if (!res.cloudSaved) {
-      showNotification('error', `تم إضافة "${newName}".${cloudWarn}`);
+    if (newScreens.includes(LICENSING_SCREEN_ID)) {
+      showNotification('success', `تم إضافة "${newName}" بنجاح. لإنشاء عهدة له كمشرف صرف: افتح "فواتير تراخيص".`);
     } else if (newScreens.includes(LICENSING_SCREEN_ID)) {
       showNotification('success', `تم إضافة "${newName}" بنجاح وحفظه في السحابة. لإنشاء عهدة له كمشرف صرف: افتح "فواتير تراخيص ← كشف الحساب والتحويلات ← إدارة مسؤولي الصرف" واضغط "إنشاء عهدة".`);
     } else {
@@ -98,7 +97,6 @@ export function UsersSettingsTab() {
   const [editUsername, setEditUsername] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editOfficialName, setEditOfficialName] = useState('');
-  const [visiblePasswordFor, setVisiblePasswordFor] = useState<string | null>(null);
 
   const startEdit = (id: string) => {
     const u = db.systemUsers.find(x => x.id === id);
@@ -106,7 +104,7 @@ export function UsersSettingsTab() {
     setEditingId(id);
     setEditName(u.display_name);
     setEditUsername(u.username);
-    setEditPassword(isHashedPassword(u.password) ? '' : u.password);
+    setEditPassword('');
     setEditOfficialName(u.linked_official_id ? (db.officials.find(o => o.id === u.linked_official_id)?.name || '') : '');
   };
 
@@ -116,8 +114,7 @@ export function UsersSettingsTab() {
       showNotification('error', res.error || 'تعذّر الحفظ');
       return;
     }
-    if (!res.cloudSaved) showNotification('error', `تم الحفظ.${cloudWarn}`);
-    else showNotification('success', 'تم حفظ بيانات المستخدم بنجاح.');
+    showNotification('success', 'تم حفظ بيانات المستخدم بنجاح.');
     setEditingId(null);
   };
 
@@ -129,13 +126,33 @@ export function UsersSettingsTab() {
       showNotification('error', res.error || 'تعذّر تحديث الشاشات');
       return;
     }
-    if (!res.cloudSaved) showNotification('error', `تم تحديث الشاشات.${cloudWarn}`);
+  };
+
+  const handleToggleActive = async (id: string, name: string, isActive: boolean) => {
+    if (isActive && !window.confirm(`إيقاف حساب "${name}"؟ هيتمنع من الدخول وقراءة البيانات فورًا (الحساب والبيانات مش بتتمسح).`)) return;
+    const res = await db.updateSystemUser(id, { active: !isActive });
+    if (!res.success) { showNotification('error', res.error || 'تعذّر التغيير'); return; }
+    showNotification('success', isActive ? `تم إيقاف "${name}".` : `تم تفعيل "${name}".`);
+  };
+
+  // ---- تفعيل دخول المستخدمين المنقولين من النظام القديم (أدمن بس) ----
+  const [provisioned, setProvisioned] = useState<Array<{ id: string; username: string; display_name: string; password?: string; error?: string }> | null>(null);
+  const pendingLogin = db.systemUsers.filter(u => !u.has_login && u.active !== false);
+  const handleProvision = async () => {
+    if (!window.confirm(`هيتولّد كلمة سر مؤقتة لـ ${pendingLogin.length} مستخدم وتظهرلك مرة واحدة بس. كمّل؟`)) return;
+    const res = await db.provisionSystemUsers();
+    if (!res.success) { showNotification('error', res.error || 'تعذّر التفعيل'); return; }
+    setProvisioned(res.results);
+  };
+  const copyProvisioned = () => {
+    const text = (provisioned || []).filter(r => r.password).map(r => `${r.display_name} — ${r.username} — ${r.password}`).join('\n');
+    navigator.clipboard?.writeText(text).then(() => showNotification('success', 'تم النسخ — سلّم كل مستخدم كلمته واحذف الرسالة بعدها.'));
   };
 
   const handleDeleteUser = async (id: string, name: string) => {
     if (!window.confirm(`هل أنت متأكد من حذف المستخدم "${name}"؟ لو عنده حساب عهدة مالية، هيفضل محفوظ زي ما هو ومش هيتحذف (تقدر تحذفه من شاشة إدارة مسؤولي الصرف).`)) return;
     const res = await db.deleteSystemUser(id);
-    if (!res.cloudSaved) showNotification('error', `تم حذف "${name}" محليًا.${cloudWarn}`);
+    if (!res.success) showNotification('error', res.error || 'تعذّر الحذف');
     else showNotification('success', `تم حذف المستخدم "${name}".`);
   };
 
@@ -170,6 +187,33 @@ export function UsersSettingsTab() {
         </div>
       )}
 
+      {db.currentUser?.role === 'admin' && pendingLogin.length > 0 && !provisioned && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs font-bold text-amber-300 leading-relaxed">
+            {pendingLogin.length} مستخدم اتنقلوا من النظام القديم ولسه دخولهم مش مفعّل (كلمات السر القديمة اتلغت لأسباب أمنية). فعّل دخولهم بكلمات سر مؤقتة جديدة.
+          </p>
+          <button type="button" onClick={handleProvision} className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-lg">تفعيل دخول الكل</button>
+        </div>
+      )}
+      {provisioned && (
+        <div className="bg-slate-900 border border-emerald-500/30 rounded-2xl p-4 space-y-3">
+          <p className="text-xs font-black text-emerald-300">كلمات السر المؤقتة — بتظهر مرة واحدة بس. سلّمها لأصحابها وانصحهم يغيّروها.</p>
+          <div className="space-y-1 font-mono text-[11px] text-slate-200" dir="ltr">
+            {provisioned.map(r => (
+              <div key={r.id} className="flex flex-wrap gap-3 bg-slate-950 rounded-lg px-3 py-1.5">
+                <span className="text-slate-400">{r.display_name}</span>
+                <span>{r.username}</span>
+                {r.password ? <span className="text-emerald-300 font-bold">{r.password}</span> : <span className="text-rose-300">{r.error}</span>}
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={copyProvisioned} className="bg-emerald-500 text-slate-950 font-black text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5"><Copy className="w-3.5 h-3.5" /> نسخ الكل</button>
+            <button type="button" onClick={() => setProvisioned(null)} className="bg-slate-800 text-slate-300 font-bold text-xs px-3 py-1.5 rounded-lg">تم — إخفاء</button>
+          </div>
+        </div>
+      )}
+
       {showAddForm && (
         <form onSubmit={handleAddUser} className="bg-slate-900 border border-emerald-500/20 rounded-2xl p-5 space-y-4">
           <h3 className="text-sm font-black text-slate-200 flex items-center gap-2"><UserPlus className="w-4 h-4 text-emerald-400" /> مستخدم جديد</h3>
@@ -184,7 +228,7 @@ export function UsersSettingsTab() {
             </div>
             <div>
               <label className="block text-slate-400 font-bold mb-1">كلمة المرور</label>
-              <input type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500 font-mono" autoComplete="off" />
+              <input type="password" autoComplete="new-password" placeholder="8 حروف على الأقل" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500 font-mono" />
             </div>
           </div>
           <div>
@@ -227,7 +271,7 @@ export function UsersSettingsTab() {
                       <span className="text-slate-600">/</span>
                       <input value={editUsername} onChange={(e) => setEditUsername(e.target.value)} placeholder="اسم المستخدم" className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono outline-none focus:border-emerald-500 w-28" />
                       <span className="text-slate-600 flex items-center gap-1"><Key className="w-3 h-3" /></span>
-                      <input value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder={isHashedPassword(u.password) ? 'كلمة مرور جديدة (اختياري)' : 'كلمة المرور'} className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono outline-none focus:border-emerald-500 w-28" />
+                      <input value={editPassword} onChange={(e) => setEditPassword(e.target.value)} type="password" autoComplete="new-password" placeholder="كلمة مرور جديدة (اختياري)" className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono outline-none focus:border-emerald-500 w-28" />
                       {u.linked_official_id && (
                         <input value={editOfficialName} onChange={(e) => setEditOfficialName(e.target.value)} placeholder="اسم مسؤول التراخيص" title="اسم مسؤول التراخيص (مستقل عن الاسم واسم المستخدم)" className="bg-slate-950 border border-amber-500/40 rounded-lg px-2.5 py-1.5 text-amber-300 text-xs font-bold outline-none focus:border-amber-400 w-36" />
                       )}
@@ -238,13 +282,12 @@ export function UsersSettingsTab() {
                     <>
                       <span className="font-black text-slate-100 text-sm flex items-center gap-1.5"><Users className="w-4 h-4 text-slate-500" /> {u.display_name}</span>
                       <span className="font-mono text-slate-500 text-[11px]">@{u.username}</span>
-                      <span className="font-mono text-slate-600 text-[11px] flex items-center gap-1">
-                        <Key className="w-3 h-3" />
-                        {visiblePasswordFor === u.id ? (isHashedPassword(u.password) ? 'مشفّرة' : u.password) : '••••••'}
-                        <button type="button" onClick={() => setVisiblePasswordFor(v => v === u.id ? null : u.id)} className="text-slate-500 hover:text-slate-300">
-                          {visiblePasswordFor === u.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                        </button>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${u.has_login ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
+                        <Key className="w-3 h-3" /> {u.has_login ? 'الدخول مفعّل' : 'الدخول لسه مش مفعّل'}
                       </span>
+                      {u.active === false && (
+                        <span className="bg-rose-500/10 text-rose-300 border border-rose-500/20 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1"><Ban className="w-3 h-3" /> موقوف</span>
+                      )}
                       {u.linked_official_id && (
                         <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1">
                           <Wallet className="w-3 h-3" /> مسؤول التراخيص: {db.officials.find(o => o.id === u.linked_official_id)?.name || '—'}
@@ -263,6 +306,11 @@ export function UsersSettingsTab() {
                     <button type="button" onClick={() => startEdit(u.id)} className="text-slate-500 hover:text-emerald-400 p-1.5 bg-slate-950 border border-slate-800 rounded" title="تعديل الاسم/اليوزر/الباسورد">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
+                    {!isActiveSession && (
+                      <button type="button" onClick={() => handleToggleActive(u.id, u.display_name, u.active !== false)} className="text-slate-500 hover:text-amber-400 p-1.5 bg-slate-950 border border-slate-800 rounded" title={u.active === false ? 'تفعيل الحساب' : 'إيقاف الحساب (يمنعه من الدخول فورًا)'}>
+                        <Power className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button type="button" onClick={() => handleDeleteUser(u.id, u.display_name)} className="text-red-400 hover:bg-red-500/10 p-1.5 bg-slate-950 border border-red-500/10 rounded" title="حذف المستخدم">
                       <UserMinus className="w-3.5 h-3.5" />
                     </button>
