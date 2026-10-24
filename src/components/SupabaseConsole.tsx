@@ -134,7 +134,7 @@ CREATE TABLE IF NOT EXISTS officials (
   name VARCHAR(100) NOT NULL,
   cash_custody DECIMAL(12, 2) DEFAULT 0.00,
   visa_custody DECIMAL(12, 2) DEFAULT 0.00,
-  password VARCHAR(100) DEFAULT '123'
+  password VARCHAR(100)
 );
 
 -- 2. Drivers Table
@@ -348,8 +348,8 @@ CREATE TABLE IF NOT EXISTS car_monthly_costs (
   CONSTRAINT unique_car_monthly UNIQUE (car_id, month)
 );
 
-ALTER TABLE car_daily_costs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE car_monthly_costs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE car_daily_costs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE car_monthly_costs ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON car_daily_costs, car_monthly_costs TO anon, authenticated;
 
 -- 14c. سجل التموين وخطط الصيانة الوقائية
@@ -379,28 +379,28 @@ CREATE TABLE IF NOT EXISTS service_plans (
   updated_by VARCHAR(100)
 );
 
-ALTER TABLE fuel_logs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE service_plans DISABLE ROW LEVEL SECURITY;
+ALTER TABLE fuel_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE service_plans ENABLE ROW LEVEL SECURITY;
 GRANT ALL ON fuel_logs, service_plans TO anon, authenticated;
 
--- 15. تعطيل حماية الصفوف (DISABLE RLS) للمزامنة المفتوحة السلسة عبر جميع الأجهزة والهواتف
-ALTER TABLE officials DISABLE ROW LEVEL SECURITY;
-ALTER TABLE drivers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE cars DISABLE ROW LEVEL SECURITY;
-ALTER TABLE violations DISABLE ROW LEVEL SECURITY;
-ALTER TABLE invoices DISABLE ROW LEVEL SECURITY;
-ALTER TABLE invoice_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE invoice_audit_logs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE driver_account_movements DISABLE ROW LEVEL SECURITY;
-ALTER TABLE custody_accounts DISABLE ROW LEVEL SECURITY;
-ALTER TABLE custody_movements DISABLE ROW LEVEL SECURITY;
-ALTER TABLE system_settings DISABLE ROW LEVEL SECURITY;
-ALTER TABLE transport_requests DISABLE ROW LEVEL SECURITY;
-ALTER TABLE maintenance_requests DISABLE ROW LEVEL SECURITY;
-ALTER TABLE maintenance_invoices DISABLE ROW LEVEL SECURITY;
+-- 15. تفعيل حماية الصفوف (RLS) — السياسات في sql/security-02-lockdown.sql
+ALTER TABLE officials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE drivers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cars ENABLE ROW LEVEL SECURITY;
+ALTER TABLE violations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE driver_account_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custody_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custody_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE system_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transport_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE maintenance_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE maintenance_invoices ENABLE ROW LEVEL SECURITY;
 
 -- 16. تدارك إضافة الأعمدة القديمة تلقائيًا (Migration Scripts)
-ALTER TABLE officials ADD COLUMN IF NOT EXISTS password VARCHAR(100) DEFAULT '123';
+ALTER TABLE officials ADD COLUMN IF NOT EXISTS password VARCHAR(100);
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS traffic_office VARCHAR(100);
 
 -- 17. سجل مراحل الصيانة + إرجاع فواتير التراخيص بسبب
@@ -439,7 +439,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   read_by JSONB DEFAULT '[]'::jsonb
 );
 CREATE INDEX IF NOT EXISTS notifications_created_at_idx ON notifications (created_at DESC);
-ALTER TABLE notifications DISABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 
 -- 21. دخول تطبيق السائق: رقم سري لكل سائق (مخزّن مشفّر SHA-256 + salt) — بيتحدد من شاشة متابعة السائقين
 CREATE TABLE IF NOT EXISTS driver_app_access (
@@ -448,7 +448,7 @@ CREATE TABLE IF NOT EXISTS driver_app_access (
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   updated_by VARCHAR(150)
 );
-ALTER TABLE driver_app_access DISABLE ROW LEVEL SECURITY;`;
+ALTER TABLE driver_app_access ENABLE ROW LEVEL SECURITY;`;
 
   const tableSchemas = {
     cars: `CREATE TABLE IF NOT EXISTS cars (
@@ -481,7 +481,7 @@ ALTER TABLE driver_app_access DISABLE ROW LEVEL SECURITY;`;
   name VARCHAR(100) NOT NULL,
   cash_custody DECIMAL(12, 2) DEFAULT 0.00,
   visa_custody DECIMAL(12, 2) DEFAULT 0.00,
-  password VARCHAR(100) DEFAULT '123'
+  password VARCHAR(100)
 );`,
     violations: `CREATE TABLE IF NOT EXISTS violations (
   id TEXT PRIMARY KEY,
@@ -1297,27 +1297,27 @@ ALTER TABLE driver_app_access DISABLE ROW LEVEL SECURITY;`;
               <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-3">
                 <h4 className="font-bold text-slate-202 text-sm flex items-center gap-1.5 text-rose-400 border-b border-slate-800 pb-2">
                   <ShieldAlert className="w-4 h-4 text-rose-500" />
-                  حل مشكلة RLS (Row-Level Security Policy) و تكرار الرفع فوريًا
+                  إعداد الأمان (RLS) وإسقاط قيود التكرار
                 </h4>
                 <div className="bg-rose-500/10 border border-rose-500/30 p-3 rounded-xl text-xs text-rose-300 leading-relaxed text-right space-y-1 animate-pulse">
                   <span className="font-bold block text-rose-400">هل تظهر لك رسالة "violates unique constraint" أو "violates row-level security policy"؟</span>
                   <p className="text-slate-200">تحدث هذه المشاكل لأن مشروع Supabase يقوم بتفعيل حماية الصفوف (RLS) تلقائيًا على الجداول الجديدة، أو لوجود رقم قومي متكرر.</p>
                 </div>
                 <p className="text-xs text-slate-350 leading-relaxed text-right">
-                  لإلغاء قيود الصفوف وحل مشكلة تكرار الأرقام القومية فوريًا، يرجى نسخ الكود التالي ولصقه داخل نافذة <span className="font-extrabold text-emerald-400">SQL Editor</span> في حساب Supabase الخاص بك ثم اضغط <span className="font-extrabold text-emerald-400">Run</span>:
+                  ⚠️ ممنوع تعطيل RLS. لتفعيل الحماية شغّل ملفي sql/security-01-schema.sql ثم sql/security-02-lockdown.sql (بتفعيل الدخول الحقيقي بس بيقدر أي حد يقرا). لإسقاط قيود التكرار، انسخ الكود التالي ولصقه داخل نافذة <span className="font-extrabold text-emerald-400">SQL Editor</span> في حساب Supabase الخاص بك ثم اضغط <span className="font-extrabold text-emerald-400">Run</span>:
                 </p>
                 <div className="relative group font-mono text-[10px]">
                   <pre className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 text-amber-400 overflow-x-auto text-left leading-relaxed">
-{`ALTER TABLE officials DISABLE ROW LEVEL SECURITY;
-ALTER TABLE drivers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE cars DISABLE ROW LEVEL SECURITY;
-ALTER TABLE violations DISABLE ROW LEVEL SECURITY;
-ALTER TABLE invoices DISABLE ROW LEVEL SECURITY;
-ALTER TABLE invoice_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE invoice_audit_logs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE driver_account_movements DISABLE ROW LEVEL SECURITY;
-ALTER TABLE custody_accounts DISABLE ROW LEVEL SECURITY;
-ALTER TABLE custody_movements DISABLE ROW LEVEL SECURITY;
+{`ALTER TABLE officials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE drivers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cars ENABLE ROW LEVEL SECURITY;
+ALTER TABLE violations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE driver_account_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custody_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custody_movements ENABLE ROW LEVEL SECURITY;
 
 -- حل مشكلة تكرار الأرقام القومية والأكواد تماماً في قاعدة البيانات
 ALTER TABLE drivers DROP CONSTRAINT IF EXISTS drivers_national_id_key;
@@ -1328,16 +1328,16 @@ ALTER TABLE violations DROP CONSTRAINT IF EXISTS unique_violation_date_car;`}
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(`ALTER TABLE officials DISABLE ROW LEVEL SECURITY;
-ALTER TABLE drivers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE cars DISABLE ROW LEVEL SECURITY;
-ALTER TABLE violations DISABLE ROW LEVEL SECURITY;
-ALTER TABLE invoices DISABLE ROW LEVEL SECURITY;
-ALTER TABLE invoice_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE invoice_audit_logs DISABLE ROW LEVEL SECURITY;
-ALTER TABLE driver_account_movements DISABLE ROW LEVEL SECURITY;
-ALTER TABLE custody_accounts DISABLE ROW LEVEL SECURITY;
-ALTER TABLE custody_movements DISABLE ROW LEVEL SECURITY;
+                      navigator.clipboard.writeText(`ALTER TABLE officials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE drivers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cars ENABLE ROW LEVEL SECURITY;
+ALTER TABLE violations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE driver_account_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custody_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE custody_movements ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE drivers DROP CONSTRAINT IF EXISTS drivers_national_id_key;
 ALTER TABLE drivers DROP CONSTRAINT IF EXISTS drivers_driver_code_key;
@@ -1352,7 +1352,7 @@ ALTER TABLE violations DROP CONSTRAINT IF EXISTS unique_violation_date_car;`);
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-500 italic text-right">
-                  * هذا الإجراء يوقف حماية الصفوف الفردية ويسقط قيد تكرار رقم البطاقة لتمكين المزامنة التامّة بسلاسة دون تعقيد تشفير أو رفض الرفع.
+                  * هذا الإجراء يُبقي حماية الصفوف مفعّلة ويسقط قيد تكرار رقم البطاقة لتمكين المزامنة التامّة بسلاسة دون تعقيد تشفير أو رفض الرفع.
                 </p>
               </div>
             </div>

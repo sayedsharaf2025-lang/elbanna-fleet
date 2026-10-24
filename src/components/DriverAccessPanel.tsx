@@ -6,7 +6,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useDb } from '../db/store';
 import { getSupabaseClient } from '../db/supabaseClient';
-import { hashPassword } from '../db/passwordUtil';
 import { normalizePin, validatePin } from '../driver/driverLogic';
 import { KeyRound, Smartphone, Search, Copy, ChevronDown, ChevronUp, Trash2, Dices } from 'lucide-react';
 
@@ -23,13 +22,13 @@ export function DriverAccessPanel() {
   const [busy, setBusy] = useState(false);
 
   const appLink = `${window.location.origin}/driver`;
-  const SETUP = 'جدول دخول السائقين لسه مش موجود في Supabase — شغّل سكريبت driver-app.sql مرة واحدة في SQL Editor.';
+  const SETUP = 'جدول دخول السائقين لسه مش موجود في Supabase — شغّل سكريبت sql/security-01-schema.sql مرة واحدة في SQL Editor.';
 
   const loadAccess = async () => {
     const client = getSupabaseClient();
     if (!client) { setLoadError('الاتصال بالسحابة غير مفعّل.'); return; }
-    const { data, error } = await client.from('driver_app_access').select('driver_id, updated_at');
-    if (error) { setLoadError(/driver_app_access|does not exist|schema cache/i.test(error.message) ? SETUP : error.message); return; }
+    const { data, error } = await client.rpc('driver_access_status');
+    if (error) { setLoadError(/driver_access_status|does not exist|schema cache/i.test(error.message) ? SETUP : /not_allowed/.test(error.message) ? 'مفيش عندك صلاحية إدارة دخول السائقين.' : error.message); return; }
     setLoadError(null);
     const map: Record<string, string> = {};
     (data || []).forEach((r: any) => { map[r.driver_id] = r.updated_at; });
@@ -56,9 +55,9 @@ export function DriverAccessPanel() {
     const client = getSupabaseClient();
     if (!client) { setMsg({ type: 'err', text: 'الاتصال بالسحابة غير مفعّل.' }); return; }
     setBusy(true);
-    const { error } = await client.from('driver_app_access').upsert([{ driver_id: driverId, pin_hash: hashPassword(normalizePin(pin)), updated_at: new Date().toISOString(), updated_by: db.currentUser?.name || db.currentUser?.username || '' }]);
+    const { error } = await client.rpc('set_driver_pin', { p_driver_id: driverId, p_pin: normalizePin(pin) });
     setBusy(false);
-    if (error) { setMsg({ type: 'err', text: /driver_app_access|does not exist|schema cache/i.test(error.message) ? SETUP : error.message }); return; }
+    if (error) { setMsg({ type: 'err', text: /set_driver_pin|does not exist|schema cache/i.test(error.message) ? SETUP : error.message.replace(/^.*invalid_pin: /, '') }); return; }
     setMsg({ type: 'ok', text: `تم حفظ الرقم السري. سلّمه للسائق دلوقتي (${normalizePin(pin)}) — مش هيتعرض تاني.` });
     setEditingId(null); setPin('');
     loadAccess();
@@ -68,12 +67,12 @@ export function DriverAccessPanel() {
     if (!window.confirm(`إلغاء دخول السائق ${name} لتطبيق السائق؟`)) return;
     const client = getSupabaseClient();
     if (!client) return;
-    const { error } = await client.from('driver_app_access').delete().eq('driver_id', driverId);
+    const { error } = await client.rpc('revoke_driver_access', { p_driver_id: driverId });
     setMsg(error ? { type: 'err', text: error.message } : { type: 'ok', text: 'تم إلغاء الدخول.' });
     loadAccess();
   };
 
-  const randomPin = () => setPin(String(Math.floor(100000 + Math.random() * 900000)));
+  const randomPin = () => setPin(String(100000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900000)));
 
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow">
@@ -115,7 +114,7 @@ export function DriverAccessPanel() {
                   </div>
                   {editing && (
                     <div className="flex flex-wrap items-center gap-2">
-                      <input value={pin} onChange={e => setPin(e.target.value)} inputMode="numeric" placeholder="4 إلى 8 أرقام" className="flex-1 min-w-32 p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 font-mono font-bold text-slate-800" />
+                      <input value={pin} onChange={e => setPin(e.target.value)} inputMode="numeric" placeholder="6 إلى 8 أرقام" className="flex-1 min-w-32 p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 font-mono font-bold text-slate-800" />
                       <button type="button" onClick={randomPin} className="p-2.5 rounded-lg bg-slate-100 text-slate-600" aria-label="رقم عشوائي"><Dices className="w-4 h-4" /></button>
                       <button type="button" disabled={busy} onClick={() => savePin(d.id)} className="px-4 py-2.5 rounded-lg bg-emerald-600 disabled:bg-slate-300 text-white font-bold text-xs">حفظ</button>
                     </div>

@@ -5,7 +5,6 @@
 
 import React, { useState } from 'react';
 import { useDb } from '../db/store';
-import { isHashedPassword, verifyPassword } from '../db/passwordUtil';
 import { Invoice, InvoiceItem, CustodyAccount, CustodyMovement, Official } from '../types';
 import { A5PrintPreview } from './A5PrintPreview';
 import { PdfInvoiceImport } from './PdfInvoiceImport';
@@ -61,15 +60,13 @@ interface DraftVoucher {
 
 interface AdminOfficialPasswordRowProps {
   official: Official;
-  currentPass: string;
   linkedUserName?: string;
   onUpdate: (newPass: string) => void;
   onDelete: () => void;
 }
 
-const AdminOfficialPasswordRow: React.FC<AdminOfficialPasswordRowProps> = ({ official, currentPass, linkedUserName, onUpdate, onDelete }) => {
+const AdminOfficialPasswordRow: React.FC<AdminOfficialPasswordRowProps> = ({ official, linkedUserName, onUpdate, onDelete }) => {
   const [newPasswordVal, setNewPasswordVal] = useState('');
-  const [showPass, setShowPass] = useState(false);
 
   return (
     <tr className="border-b border-slate-800/60 hover:bg-slate-900/40 text-slate-300">
@@ -79,29 +76,16 @@ const AdminOfficialPasswordRow: React.FC<AdminOfficialPasswordRowProps> = ({ off
           ? <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">@{linkedUserName}</span>
           : <span className="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded-full" title="المشرف ده موجود في العهد بس ومالوش مستخدم دخول في شاشة المستخدمين">بدون مستخدم</span>}
       </td>
-      <td className="py-2.5 px-3 text-center font-mono text-[11px] font-bold">
-        <div className="flex items-center justify-center gap-1.5">
-          <span className="bg-slate-950 px-2 py-1 rounded text-yellow-405 border border-slate-800">
-            {showPass ? (isHashedPassword(currentPass) ? 'مشفّرة' : currentPass) : '••••••'}
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowPass(!showPass)}
-            className="text-[10px] text-indigo-400 hover:text-indigo-305 underline"
-          >
-            {showPass ? 'إخفاء' : 'عرض'}
-          </button>
-        </div>
-      </td>
+      <td className="py-2.5 px-3 text-center text-[11px] text-slate-500">محفوظة مشفّرة — مبتتعرضش</td>
       <td className="py-2.5 px-3 text-center">
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (newPasswordVal.trim().length >= 3) {
-              onUpdate(newPasswordVal.trim());
+            if (newPasswordVal.length >= 8) {
+              onUpdate(newPasswordVal);
               setNewPasswordVal('');
             } else {
-              alert('كلمة المرور يجب أن تكون 3 أحرف على الأقل!');
+              alert('كلمة المرور يجب أن تكون 8 أحرف على الأقل!');
             }
           }}
           className="flex items-center justify-center gap-1.5"
@@ -1947,23 +1931,22 @@ export const InvoicesTab: React.FC = () => {
                       <tr className="border-b border-slate-800 text-slate-400">
                         <th className="py-2.5 px-3 font-bold text-right">اسم مسؤول الصرف</th>
                         <th className="py-2.5 px-3 font-bold text-center">مستخدم الدخول</th>
-                        <th className="py-2.5 px-3 font-bold text-center">كلمة السر الحالية</th>
+                        <th className="py-2.5 px-3 font-bold text-center">كلمة السر</th>
                         <th className="py-2.5 px-3 font-bold text-center">تعيين كلمة سر جديدة</th>
                         <th className="py-2.5 px-3 font-bold text-center">حذف</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-850">
                       {db.officials.map(o => {
-                        const currentPass = o.password || '123';
                         return (
                           <AdminOfficialPasswordRow 
                             key={o.id} 
                             official={o} 
-                            currentPass={currentPass} 
                             linkedUserName={db.systemUsers.find(u => u.linked_official_id === o.id)?.username}
-                            onUpdate={(newP) => {
-                              db.updateOfficialPassword(o.id, newP);
-                              showStatus(`تم بنجاح تحديث كلمة المرور للمسؤول (${o.name}) ماليًا.`, "success");
+                            onUpdate={async (newP) => {
+                              const r = await db.updateOfficialPassword(o.id, newP);
+                              if (r.success) showStatus(`تم تحديث كلمة المرور للمسؤول (${o.name}).`, "success");
+                              else showStatus(r.error || 'تعذّر تحديث كلمة المرور', "error");
                             }}
                             onDelete={() => handleDeleteOfficial(o)}
                           />
@@ -2529,25 +2512,13 @@ export const InvoicesTab: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={(e) => {
+          <form onSubmit={async (e) => {
             e.preventDefault();
             setPersonalPasswordError('');
             setPersonalPasswordSuccess('');
 
-            const official = db.officials.find(o => o.id === db.currentUser?.officialId);
-            if (!official) {
-              setPersonalPasswordError('المسؤول غير متوفر في قاعدة البيانات!');
-              return;
-            }
-
-            const currentActualPassword = official.password || '123';
-            if (!verifyPassword(personalOldPassword, currentActualPassword)) {
-              setPersonalPasswordError('كلمة المرور الحالية غير صحيحة!');
-              return;
-            }
-
-            if (personalNewPassword.trim().length < 3) {
-              setPersonalPasswordError('يجب أن تكون كلمة المرور الجديدة مكونة من 3 أحرف على الأقل!');
+            if (personalNewPassword.length < 8) {
+              setPersonalPasswordError('يجب أن تكون كلمة المرور الجديدة 8 أحرف على الأقل!');
               return;
             }
 
@@ -2556,7 +2527,11 @@ export const InvoicesTab: React.FC = () => {
               return;
             }
 
-            db.updateOfficialPassword(official.id, personalNewPassword);
+            const r = await db.changeOwnPassword(personalOldPassword, personalNewPassword);
+            if (!r.success) {
+              setPersonalPasswordError(r.error || 'تعذّر تغيير كلمة المرور');
+              return;
+            }
             setPersonalPasswordSuccess('تم تحديث كلمة المرور بنجاح!');
             setPersonalOldPassword('');
             setPersonalNewPassword('');

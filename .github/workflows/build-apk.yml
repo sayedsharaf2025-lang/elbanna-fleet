@@ -1,7 +1,7 @@
-name: Build Android APK (التطبيق الكلي)
+name: Build Android APK
+
 on:
-  push:
-    branches: [main, master]
+  # بقى يدوي فقط (Actions ← Run workflow) عشان الـ push يبني تطبيقين بس: السائق والكامل
   workflow_dispatch:
 
 jobs:
@@ -9,38 +9,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
       - name: Install dependencies
-        working-directory: ./elbanna_fleet_v2
         run: npm install --no-audit --no-fund
 
-      - name: Build web app
-        working-directory: ./elbanna_fleet_v2
+      - name: Build web app (requests mode)
         run: npx vite build --mode requests
         env:
+          # اختياري: لو عايز تثبّت مشروع Supabase في التطبيق بدل الافتراضي
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
-          NO_MINIFY: 1
 
       - name: Add Android platform
-        working-directory: ./elbanna_fleet_v2
         run: |
           npx cap add android
+          # صلاحية الكاميرا (تصوير فواتير شراء قطع الغيار)
+          sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA" />\n    <uses-feature android:name="android.hardware.camera" android:required="false" />\n    <application#' android/app/src/main/AndroidManifest.xml
           npx cap sync android
 
       - name: Build debug APK
-        working-directory: ./elbanna_fleet_v2/android
+        working-directory: android
         run: ./gradlew assembleDebug --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
           name: elbanna-requests-apk
-          path: elbanna_fleet_v2/android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

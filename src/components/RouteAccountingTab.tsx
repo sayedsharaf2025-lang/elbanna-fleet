@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { escapeHtml } from '../utils/escapeHtml';
 import React, { useMemo, useState } from 'react';
 import { useNavFocus } from '../hooks/useNavFocus';
 import { useDb } from '../db/store';
@@ -157,12 +158,12 @@ export function RouteAccountingTab() {
         .route { text-align:right; } @media print { body{padding:0;} }
       </style></head><body>
         <h1>كشف حساب خطوط السير (لكل سيارة/يوم)</h1>
-        <div class="sub">${filterLabel} — تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')} — عدد السجلات: ${rows.length}</div>
+        <div class="sub">${escapeHtml(filterLabel)} — تاريخ الطباعة: ${new Date().toLocaleDateString('ar-EG')} — عدد السجلات: ${rows.length}</div>
         <table><thead><tr>
           <th>التاريخ</th><th>السيارة</th><th>السائق</th><th>المسافة</th><th>دخان</th><th>نولون</th><th>بنود أخرى</th><th>الإجمالي</th>
         </tr></thead><tbody>
           ${rows.map(x => `<tr>
-            <td>${x.g.date}</td><td>${x.car?.car_number || '-'}</td><td>${x.drivers}</td>
+            <td>${escapeHtml(x.g.date)}</td><td>${escapeHtml(x.car?.car_number || '-')}</td><td>${escapeHtml(x.drivers)}</td>
             <td>${x.t.distance.toLocaleString()} كم</td><td>${x.t.smoke.toLocaleString()}</td>
             <td>${x.t.freight.toLocaleString()}</td><td>${x.t.others.toLocaleString()}</td>
             <td>${x.t.grand.toLocaleString()}</td>

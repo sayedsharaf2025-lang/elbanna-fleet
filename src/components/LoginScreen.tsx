@@ -9,24 +9,12 @@ export function LoginScreen() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // تشخيص السحابة: لو الجهاز مش شايف مستخدمين في السحابة نوضّح السبب بدل ما يفتح بـ admin/admin بصمت
+  // تشخيص بسيط: لو مفيش إعدادات سحابة على الجهاز نوضّح ده (الدخول نفسه بيتم عبر Supabase Auth)
   const [cloudDiag, setCloudDiag] = useState<string | null>(null);
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const client = getSupabaseClient();
-      if (!client) { if (!cancelled) setCloudDiag('مفيش إعدادات سحابة على الجهاز ده (رابط Supabase والمفتاح) — البيانات مش هتظهر.'); return; }
-      try {
-        const { data, error: err } = await client.from('system_settings').select('key').eq('key', 'system_users').maybeSingle();
-        if (cancelled) return;
-        if (err) setCloudDiag(`تعذر قراءة السحابة: ${err.message}. اتأكد إن مشروع Supabase شغال (مش موقوف) وإن الرابط والمفتاح صح.`);
-        else if (!data) setCloudDiag('السحابة ردّت لكن مفيش فيها مستخدمين مسجلين. ده معناه غالبًا إن RLS مفعّل على الجداول (فبترجع فاضية) — شغّل أوامر DISABLE ROW LEVEL SECURITY من «إعدادات السحاب والـ SQL». لحد ما يتصلح، الدخول بيكون بـ admin / admin والبيانات مش ظاهرة.');
-        else setCloudDiag(null);
-      } catch (e: any) {
-        if (!cancelled) setCloudDiag(`تعذر الاتصال بالسحابة: ${e?.message || 'خطأ شبكة'}. اتأكد من الإنترنت.`);
-      }
-    })();
-    return () => { cancelled = true; };
+    if (!getSupabaseClient()) {
+      setCloudDiag('مفيش إعدادات سحابة على الجهاز ده (رابط Supabase والمفتاح) — مش هينفع تسجيل الدخول.');
+    }
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {

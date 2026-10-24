@@ -55,8 +55,13 @@ export const getSupabaseClient = (): SupabaseClient | null => {
   
   try {
     clientInstance = createClient(url, key, {
+      // جلسة الدخول (Supabase Auth) لازم تتحفظ وتتجدد — عشان كل طلب للجداول يتبعت بتوكن الموظف
+      // (سياسات RLS بتعتمد عليه). تطبيق السائق مالوش جلسة Auth: بيكلّم Edge Function بتوكنه الخاص.
       auth: {
-        persistSession: false
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+        storageKey: 'elbanna-auth'
       },
       ...(secret ? { global: { headers: { 'x-app-secret': secret } } } : {})
     });

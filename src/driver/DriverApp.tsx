@@ -10,7 +10,7 @@ import {
 import { nextTripAction, TRIP_STATUS_LABELS, type TripAction } from '../db/logic/tripFlow';
 import { formatLocalTime } from '../db/logic/driverTracking';
 import {
-  DriverSession, TripsSnapshot, loginDriver, verifySession, fetchTrips, fetchLastOdometer, applyTripAction,
+  DriverSession, TripsSnapshot, loginDriver, verifySession, fetchTrips, fetchLastOdometer, applyTripAction, isSessionInvalid,
 } from './driverApi';
 import {
   actionButtonLabel, bucketTrips, canAcceptTrip, checkFinishInput, localYmd, lockUntilMs, newAssignments, stopStates, type StopState,
@@ -26,7 +26,8 @@ const loadSession = (): DriverSession | null => {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     const s = raw ? JSON.parse(raw) : null;
-    return s && s.id && s.name ? s : null;
+    // جلسات قديمة من غير توكن (قبل تأمين التطبيق) أو منتهية: لازم دخول جديد
+    return s && s.id && s.name && typeof s.token === 'string' && s.token && (!s.expires_at || s.expires_at > Date.now()) ? s : null;
   } catch { return null; }
 };
 
@@ -141,8 +142,9 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
   const load = useCallback(async () => {
     if (loading.current) return;
     loading.current = true;
-    const res = await fetchTrips(session.id);
+    const res = await fetchTrips(session);
     loading.current = false;
+    if (isSessionInvalid(res)) { onLogout('انتهت الجلسة أو اتغيّر الرقم السري — سجّل الدخول من جديد.'); return; }
     if (!res.ok || !res.data) { setError(res.error || 'تعذر تحميل الرحلات.'); return; }
     const data = res.data;
     setError(null);
@@ -160,7 +162,7 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
       const t = fresh[0];
       alertUser('طلب جديد', `${t.request_number} — ${[t.farm_name, ...(t.destinations || [])].join(' ← ')}`);
     }
-  }, [session.id]);
+  }, [session.token]);
 
   useEffect(() => {
     // لو المكتب لغى دخول السائق أو حذفه يتسجل خروجه
@@ -186,6 +188,7 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
     setBusy(true);
     const res = await applyTripAction(trip, action, payload, session, snap?.cars[trip.assigned_car_id || ''], localYmd());
     setBusy(false);
+    if (isSessionInvalid(res)) { onLogout('انتهت الجلسة أو اتغيّر الرقم السري — سجّل الدخول من جديد.'); return false; }
     if (!res.ok) { showToast('error', res.error || 'تعذر تنفيذ الخطوة.'); await load(); return false; }
     // تحديث فوري للشاشة قبل التحميل من السحابة
     setSnap(prev => {
@@ -300,7 +303,7 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
       )}
 
       {finishTrip && (
-        <FinishSheet trip={finishTrip} carNumber={carNo(finishTrip)} busy={busy} onClose={() => setFinishTrip(null)}
+        <FinishSheet session={session} trip={finishTrip} carNumber={carNo(finishTrip)} busy={busy} onClose={() => setFinishTrip(null)}
           onSave={async (odometer, smoke) => { const ok = await run(finishTrip, 'finish', { odometer, expectedSmoke: smoke }); if (ok) setFinishTrip(null); }} />
       )}
 
@@ -400,8 +403,8 @@ function Sheet({ children, onClose }: { children: React.ReactNode; onClose: () =
   );
 }
 
-function FinishSheet({ trip, carNumber, busy, onClose, onSave }: {
-  trip: TransportRequest; carNumber: string; busy: boolean; onClose: () => void; onSave: (odometer: number, smoke: number) => void;
+function FinishSheet({ session, trip, carNumber, busy, onClose, onSave }: {
+  session: DriverSession; trip: TransportRequest; carNumber: string; busy: boolean; onClose: () => void; onSave: (odometer: number, smoke: number) => void;
 }) {
   const [odometer, setOdometer] = useState('');
   const [smoke, setSmoke] = useState('');
@@ -411,8 +414,8 @@ function FinishSheet({ trip, carNumber, busy, onClose, onSave }: {
   const [lastOdo, setLastOdo] = useState<number | undefined>(undefined);
 
   useEffect(() => {
-    if (trip.assigned_car_id) fetchLastOdometer(trip.assigned_car_id, trip.id).then(setLastOdo);
-  }, [trip.assigned_car_id, trip.id]);
+    if (trip.assigned_car_id) fetchLastOdometer(session, trip.assigned_car_id, trip.id).then(setLastOdo);
+  }, [session.token, trip.assigned_car_id, trip.id]);
 
   const save = () => {
     const check = checkFinishInput(odometer, smoke, lastOdo);
