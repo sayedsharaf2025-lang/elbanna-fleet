@@ -7,7 +7,8 @@ const config: CapacitorConfig = {
   appName: 'إدارة البنا',
   webDir: 'dist',
   // أندرويد 15+: بيمنع المحتوى من الظهور تحت شريط الحالة وشريط التنقل
-  android: { allowMixedContent: false, adjustMarginsForEdgeToEdge: 'auto' },
+  // zoomEnabled: تكبير/تصغير وتحريك الشاشة بالإصبعين (مقفول افتراضيًا في أندرويد)
+  android: { allowMixedContent: false, adjustMarginsForEdgeToEdge: 'auto', zoomEnabled: true },
 };
 
 export default config;

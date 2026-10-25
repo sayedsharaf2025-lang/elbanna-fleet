@@ -457,3 +457,40 @@ body {
 
 /* جداول عادية (مش إدخال): الحاوية class="xl-wrap" والجدول class="xl-table xl-plain" — نفس تثبيت العناوين وأول عمود */
 .xl-table.xl-plain td { padding: 8px 10px; }
+
+/* الشاشات الكاملة على الموبايل (مسودة الترخيص / أرشيف الفواتير):
+   - تسمح بالتحريك أفقي ورأسي وبالتكبير والتصغير بالإصبعين
+   - تخلّي أي عنصر يتقلّص بدل ما يوسّع الشاشة ويتقطع من الشمال
+   داخل @layer base عشان أي min-w / max-w مكتوبة صراحة على عنصر تفضل هي الأقوى */
+.mobile-fit {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y pinch-zoom;
+}
+@layer base {
+  .mobile-fit div,
+  .mobile-fit h2,
+  .mobile-fit h3,
+  .mobile-fit h4,
+  .mobile-fit p,
+  .mobile-fit label,
+  .mobile-fit span,
+  .mobile-fit select,
+  .mobile-fit input,
+  .mobile-fit textarea {
+    min-width: 0;
+  }
+  .mobile-fit select,
+  .mobile-fit input,
+  .mobile-fit textarea {
+    max-width: 100%;
+  }
+  .mobile-fit h2,
+  .mobile-fit h3,
+  .mobile-fit h4,
+  .mobile-fit p,
+  .mobile-fit label,
+  .mobile-fit button {
+    overflow-wrap: anywhere;
+  }
+}

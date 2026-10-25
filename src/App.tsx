@@ -66,6 +66,16 @@ import {
   MapPin
 } from 'lucide-react';
 
+// تطبيق الموبايل (APK) بيحقن window.Capacitor — على الويب مفيش حاجة بالاسم ده
+// في التطبيق: مفيش تسجيل خروج تلقائي بسبب الخمول. على الويب: زي ما كان.
+const isNativeApp: boolean = (() => {
+  try {
+    return !!(window as any).Capacitor?.isNativePlatform?.();
+  } catch {
+    return false;
+  }
+})();
+
 function DashboardLayout() {
   const db = useDb();
 
@@ -127,6 +137,7 @@ function DashboardLayout() {
 
   // تسجيل خروج تلقائي بعد 30 ثانية من عدم النشاط (بدون حركة ماوس/لمس/كتابة/سكرول/ضغط)
   useEffect(() => {
+    if (isNativeApp) return; // التطبيق: بدون خروج تلقائي
     const IDLE_LIMIT_MS = 30 * 1000;
     let idleTimer: ReturnType<typeof setTimeout>;
 
@@ -212,6 +223,7 @@ function DashboardLayout() {
 
   // تسجيل خروج تلقائي بعد فترة خمول (٣٠ دقيقة) — بيشتغل كمان لو الموبايل كان في الخلفية
   useEffect(() => {
+    if (isNativeApp) return; // التطبيق: بدون خروج تلقائي
     const LIMIT_MS = 30 * 60 * 1000;
     const KEY = 'elbanna_last_activity';
     const now = () => Date.now();

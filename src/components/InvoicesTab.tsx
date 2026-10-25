@@ -9,6 +9,7 @@ import { Invoice, InvoiceItem, CustodyAccount, CustodyMovement, Official } from 
 import { A5PrintPreview } from './A5PrintPreview';
 import { PdfInvoiceImport } from './PdfInvoiceImport';
 import { SortableTh } from './SortableTh';
+import { SuggestInput, rankByFrequency } from './SuggestInput';
 import { useSort } from '../hooks/useSort';
 import { printA4Report } from '../utils/printA4';
 import { buildAccountLedger, buildOfficialLedger, MOVEMENT_TYPE_LABEL } from '../utils/custodyLedger';
@@ -153,6 +154,12 @@ const UserWithoutCustodyRow: React.FC<UserWithoutCustodyRowProps> = ({ displayNa
 
 export const InvoicesTab: React.FC = () => {
   const db = useDb();
+
+  // اقتراحات بنود الصرف: الأكثر استخدامًا الأول (بتظهر 5 بس تحت الحقل أثناء الكتابة)
+  const itemDescSuggestions = React.useMemo(
+    () => rankByFrequency((db.invoiceItems || []).map(it => it.description)),
+    [db.invoiceItems]
+  );
 
   // Active Main Sub Tab: 'invoices', 'custodies', 'pdf_import' or 'change_password'
   const [activeSubTab, setActiveSubTab] = useState<'invoices' | 'custodies' | 'pdf_import' | 'change_password'>('invoices');
@@ -1297,7 +1304,7 @@ export const InvoicesTab: React.FC = () => {
 
           {/* شاشة مسودة مصروفات ترخيص — بالحجم الكامل */}
           {invoiceView === 'draft' && (
-            <div className="fixed inset-0 z-[45] bg-slate-950 overflow-y-auto no-print" style={{ direction: 'rtl' }} id="license_draft_fullscreen">
+            <div className="fixed inset-0 z-[45] bg-slate-950 overflow-auto mobile-fit no-print" style={{ direction: 'rtl' }} id="license_draft_fullscreen">
               <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 md:px-8 py-3 flex items-center justify-between gap-3">
                 <h2 className="font-black text-slate-100 text-base md:text-xl flex items-center gap-2.5">
                   <FilePlus2 className="w-6 h-6 text-emerald-400" />
@@ -1316,8 +1323,8 @@ export const InvoicesTab: React.FC = () => {
               <div className="p-4 md:p-8 space-y-4 max-w-[1900px] mx-auto">
                 {statusBanner}
           <div className="space-y-4">
-            <div className="flex justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800">
-              <div>
+            <div className="flex flex-wrap justify-between items-center gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800">
+              <div className="min-w-0 flex-1 basis-56">
                 <h3 className="font-extrabold text-slate-100 text-sm flex items-center gap-1.5">
                   <Sparkles className="w-5 h-5 text-emerald-400" />
                   استمارات ومسودات مصروفات السيارات والترخيص قيد التحضير المفتوحة بالنا جروب
@@ -1339,13 +1346,6 @@ export const InvoicesTab: React.FC = () => {
               {db.cars.map(c => <option key={c.id} value={c.car_number} />)}
             </datalist>
 
-            {/* قائمة اقتراحات لبنود الصرف المخزّنة مسبقًا — لتسهيل استكمال الكتابة مع إمكانية التعديل الكامل */}
-            <datalist id="invoice-item-desc-datalist">
-              {Array.from(new Set(db.invoiceItems.map(it => it.description).filter(Boolean))).map(desc => (
-                <option key={desc} value={desc} />
-              ))}
-            </datalist>
-
             {/* List draft vouchers side by side or vertical bento stack */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               {draftVouchers.map((v, index) => {
@@ -1358,7 +1358,7 @@ export const InvoicesTab: React.FC = () => {
                     {/* Ribbon */}
                     <div className="absolute top-0 right-0 left-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
                     
-                    <div className="flex justify-between items-center border-b border-white/5 pb-2.5">
+                    <div className="flex flex-wrap justify-between items-center gap-2 border-b border-white/5 pb-2.5">
                       <div className="flex items-center gap-2">
                         <span className="w-5 h-5 rounded bg-emerald-500 text-slate-950 flex items-center justify-center font-bold text-xs">{index + 1}</span>
                         <h4 className="font-bold text-slate-100 text-xs md:text-sm">مسودة مصروفات ترخيص السيارة المستهدفة الفردية</h4>
@@ -1510,15 +1510,14 @@ export const InvoicesTab: React.FC = () => {
                             </div>
                             
                             <div className="sm:col-span-7">
-                              <input
-                                type="text"
+                              {/* مقترحات البنود المخزّنة: قائمة صغيرة تحت الحقل (5 كحد أقصى) بدل قائمة المتصفح اللي بتغطي الشاشة */}
+                              <SuggestInput
                                 required
-                                list="invoice-item-desc-datalist"
-                                autoComplete="off"
+                                suggestions={itemDescSuggestions}
                                 className="w-full p-1.5 rounded border border-slate-850 bg-slate-950 text-[11px]"
                                 placeholder="اكتب البند: فحص طفايات / تأمين / طابع..."
                                 value={row_item.description}
-                                onChange={(e) => handleUpdateDraftRow(v.id, row_item.id, 'description', e.target.value)}
+                                onChange={(val) => handleUpdateDraftRow(v.id, row_item.id, 'description', val)}
                               />
                             </div>
 
@@ -1574,7 +1573,7 @@ export const InvoicesTab: React.FC = () => {
 
           {/* شاشة أرشيف الفواتير — بالحجم الكامل */}
           {invoiceView === 'archive' && (
-            <div className="fixed inset-0 z-[45] bg-slate-950 overflow-y-auto no-print" style={{ direction: 'rtl' }} id="invoices_archive_fullscreen">
+            <div className="fixed inset-0 z-[45] bg-slate-950 overflow-auto mobile-fit no-print" style={{ direction: 'rtl' }} id="invoices_archive_fullscreen">
               <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 md:px-8 py-3 flex items-center justify-between gap-3">
                 <h2 className="font-black text-slate-100 text-base md:text-xl flex items-center gap-2.5">
                   <Archive className="w-6 h-6 text-indigo-400" />
