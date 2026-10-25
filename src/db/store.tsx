@@ -3538,6 +3538,88 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const isInvoiceApproved = isInvoiceApprovedPure;
   const INVOICE_LOCKED_MSG = 'الفاتورة معتمدة من المالية — التعديل أو الحذف عليها متاح لأدمن البرنامج فقط.';
 
+  // ترقيم الفواتير: المسودات مش بتتعد، ومفيش رقم بيتكرر حتى لو حاجة اتمسحت (رقم الفاتورة فريد في قاعدة البيانات)
+  const nextInvoiceNumber = (prefix: string): string => {
+    const used = new Set(invoices.map(i => i.invoice_number));
+    let n = invoices.filter(i => i.approval_status !== 'draft').length + 1;
+    let num = `${prefix}${String(n).padStart(4, '0')}`;
+    while (used.has(num)) {
+      n += 1;
+      num = `${prefix}${String(n).padStart(4, '0')}`;
+    }
+    return num;
+  };
+
+  // مسودة فاتورة: بتتحفظ في جدول الفواتير بحالة 'draft'، من غير خصم من العهدة ولا تحميل على السيارة ولا موافقة.
+  // أي تعديل (الرأس والبنود) متاح لحد ما تتحول لفاتورة نهائية (createInvoice) أو تتمسح.
+  const saveInvoiceDraft = (
+    draftId: string | null,
+    data: { invoice_date: string; official_id: string; car_id?: string; license_details?: string; license_location?: string; car_location?: string },
+    items: { description: string; amount: number; payment_method: 'cash' | 'visa'; account_id?: string }[]
+  ): { success: boolean; error?: string; draftId?: string } => {
+    if (!data.invoice_date) return { success: false, error: 'حدد تاريخ الفاتورة الأول.' };
+    const existing = draftId ? invoices.find(i => i.id === draftId && i.approval_status === 'draft') : undefined;
+    if (draftId && !existing) return { success: false, error: 'المسودة مش موجودة (يمكن اتمسحت أو اتحوّلت لفاتورة).' };
+
+    const id = existing ? existing.id : generateId('inv');
+    const total = items.reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+    const draft: Invoice = {
+      id,
+      invoice_number: existing ? existing.invoice_number : `DRAFT-${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5).toUpperCase()}`,
+      invoice_date: data.invoice_date,
+      official_id: data.official_id || '',
+      total_amount: total,
+      version: 1,
+      is_modified: false,
+      is_deleted: false,
+      car_id: data.car_id || undefined,
+      license_details: data.license_details || '',
+      license_location: data.license_location || '',
+      car_location: data.car_location || '',
+      approval_status: 'draft'
+    };
+    const newItems: InvoiceItem[] = items.map((it, idx) => ({
+      id: generateId('item'),
+      invoice_id: id,
+      car_id: data.car_id || '',
+      description: it.description || '',
+      amount: Number(it.amount) || 0,
+      payment_method: it.payment_method,
+      account_id: it.account_id || '',
+      sort_order: idx
+    }));
+
+    setInvoices(prev => existing ? prev.map(inv => inv.id === id ? draft : inv) : [draft, ...prev]);
+    setInvoiceItems(prev => [...prev.filter(it => it.invoice_id !== id), ...newItems]);
+
+    const sb = getSupabaseClient();
+    if (sb && isCloudConnected) {
+      const writeItems = () => newItems.length > 0 ? sb.from('invoice_items').insert(newItems) : Promise.resolve();
+      Promise.resolve(existing
+        ? sb.from('invoices').update(draft).eq('id', id)
+        : sb.from('invoices').insert([draft]))
+        .then(() => sb.from('invoice_items').delete().eq('invoice_id', id))
+        .then(() => writeItems())
+        .catch(e => console.error('Supabase saveInvoiceDraft error:', e));
+    }
+    return { success: true, draftId: id };
+  };
+
+  // مسح مسودة نهائيًا (مفيش لها أي أثر مالي فمفيش استرداد)
+  const deleteInvoiceDraft = (draftId: string): { success: boolean; error?: string } => {
+    const draft = invoices.find(i => i.id === draftId && i.approval_status === 'draft');
+    if (!draft) return { success: false, error: 'المسودة مش موجودة.' };
+    setInvoices(prev => prev.filter(inv => inv.id !== draftId));
+    setInvoiceItems(prev => prev.filter(it => it.invoice_id !== draftId));
+    const sb = getSupabaseClient();
+    if (sb && isCloudConnected) {
+      Promise.resolve(sb.from('invoice_items').delete().eq('invoice_id', draftId))
+        .then(() => sb.from('invoices').delete().eq('id', draftId).eq('approval_status', 'draft'))
+        .catch(e => console.error('Supabase deleteInvoiceDraft error:', e));
+    }
+    return { success: true };
+  };
+
   const createInvoice = (
     invoiceData: Omit<Invoice, 'id' | 'invoice_number' | 'version' | 'is_modified' | 'is_deleted'>,
     items: Omit<InvoiceItem, 'id' | 'invoice_id' | 'car_id'>[]
@@ -3586,7 +3668,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const totalAmount = itemsWithAcc.reduce((sum, item) => sum + item.amount, 0);
 
-    const invoiceNum = `INV-2026-${String(invoices.length + 1).padStart(4, '0')}`;
+    const invoiceNum = nextInvoiceNumber('INV-2026-');
     const newInvoiceId = generateId("inv");
     const newInvoice: Invoice = {
       ...invoiceData,
@@ -4517,7 +4599,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     // نظام الفواتير الموحد: رقم وتاريخ الفاتورة التلقائي من السيستم
     const sysDate = new Date().toISOString().split('T')[0];
-    const invoiceNum = `INV-SYS-${String(invoices.length + 1).padStart(4, '0')}`;
+    const invoiceNum = nextInvoiceNumber('INV-SYS-');
 
     const newInvoiceId = generateId('inv');
     const enrichedDetails = `${data.license_details || ''} (تفاصيل الاستيراد: فاتورة رقم ${data.external_invoice_number} تاريخ ${data.invoice_date}، نوع السيارة: ${car.car_type || 'غير محدد'})`.trim();
@@ -4767,6 +4849,13 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
+  // المسودات مخفية عن كل الشاشات والتقارير الحالية (الأرشيف والاعتماد والتكاليف والعهد) — بتظهر بس في شاشة المسودات
+  const visibleInvoices = React.useMemo(() => (invoices || []).filter(i => i.approval_status !== 'draft'), [invoices]);
+  const invoiceDrafts = React.useMemo(() => (invoices || []).filter(i => i.approval_status === 'draft' && !i.is_deleted), [invoices]);
+  const draftIdSet = React.useMemo(() => new Set(invoiceDrafts.map(i => i.id)), [invoiceDrafts]);
+  const visibleInvoiceItems = React.useMemo(() => (invoiceItems || []).filter(it => !draftIdSet.has(it.invoice_id)), [invoiceItems, draftIdSet]);
+  const invoiceDraftItems = React.useMemo(() => (invoiceItems || []).filter(it => draftIdSet.has(it.invoice_id)), [invoiceItems, draftIdSet]);
+
   return (
     <DbContext.Provider
       value={{
@@ -4774,8 +4863,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         officials: officials || [],
         cars: cars || [],
         violations: violations || [],
-        invoices: invoices || [],
-        invoiceItems: invoiceItems || [],
+        invoices: visibleInvoices,
+        invoiceItems: visibleInvoiceItems,
+        invoiceDrafts,
+        invoiceDraftItems,
         auditLogs: auditLogs || [],
         movements: movements || [],
         custodyAccounts: custodyAccounts || [],
@@ -4846,6 +4937,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         getLicenseCostForCarDay,
         updateInvoice,
         deleteInvoice,
+        saveInvoiceDraft,
+        deleteInvoiceDraft,
         restoreInvoice,
         purgeInvoice,
         importOldInvoice,

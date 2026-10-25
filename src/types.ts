@@ -95,7 +95,7 @@ export interface Invoice {
   license_details?: string; // بيان الترخيص
   license_location?: string; // مكان الترخيص
   car_location?: string; // مكان السيارة
-  approval_status?: 'pending' | 'approved' | 'returned'; // قيد موافقة المالية / معتمدة (الفواتير القديمة تعتبر معتمدة)
+  approval_status?: 'draft' | 'pending' | 'approved' | 'returned'; // مسودة (بدون أي أثر مالي) / قيد موافقة المالية / معتمدة (الفواتير القديمة تعتبر معتمدة)
   approved_by?: string; // اسم من اعتمد الفاتورة
   approved_at?: string; // وقت الاعتماد
   return_reason?: string; // سبب إرجاع المالية للفاتورة

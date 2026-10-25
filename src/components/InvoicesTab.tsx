@@ -39,11 +39,14 @@ import {
   Key,
   Archive,
   FilePlus2,
-  ArrowRight
+  ArrowRight,
+  Copy,
+  Save
 } from 'lucide-react';
 
 interface DraftVoucher {
   id: string;
+  savedDraftId?: string; // لو الاستمارة جاية من مسودة محفوظة في قاعدة البيانات
   officialId: string;
   carId: string;
   licenseDetails: string;
@@ -179,7 +182,7 @@ export const InvoicesTab: React.FC = () => {
   }, [db.currentUser]);
 
   // شاشة عهد الصرف المفتوحة: الرئيسية (اختيار العملية) / مسودة مصروفات ترخيص / أرشيف الفواتير — الاتنين الأخيرين بحجم الشاشة كاملة
-  const [invoiceView, setInvoiceView] = useState<'home' | 'draft' | 'archive'>('home');
+  const [invoiceView, setInvoiceView] = useState<'home' | 'draft' | 'archive' | 'saved_drafts'>('home');
   const [archiveSearchQuery, setArchiveSearchQuery] = useState('');
   const [archiveDateFrom, setArchiveDateFrom] = useState('');
   const [archiveDateTo, setArchiveDateTo] = useState('');
@@ -318,7 +321,11 @@ export const InvoicesTab: React.FC = () => {
   React.useEffect(() => {
     db.loadDraftVouchers().then(saved => {
       if (saved && saved.length > 0) {
-        setDraftVouchers(saved);
+        // استمارات اتفتحت من مسودة محفوظة أو نسخة فاتورة ماتتمسحش لو التحميل خلص بعدها
+        setDraftVouchers(cur => {
+          const keep = cur.filter(v => v.savedDraftId || v.id.startsWith('draft_clone_'));
+          return [...keep, ...saved.filter((sv: DraftVoucher) => !keep.some(k => k.id === sv.id))];
+        });
       }
     });
   }, []);
@@ -546,6 +553,9 @@ export const InvoicesTab: React.FC = () => {
     if (res.success) {
       showStatus(`تم حفظ وطباعة الفاتورة وإرسالها لموافقة المالية. الخصم من العهدة بيتم بعد الموافقة بس.`, "success");
 
+      // لو الفاتورة طالعة من مسودة محفوظة: المسودة خلاص اتحوّلت لفاتورة فنمسحها
+      if (voucher.savedDraftId) db.deleteInvoiceDraft(voucher.savedDraftId);
+
       // بعد الترحيل والحفظ: تقفل شاشة المسودة وترجع لشاشة عهد الصرف المفتوحة
       setInvoiceView('home');
       
@@ -578,6 +588,135 @@ export const InvoicesTab: React.FC = () => {
       showStatus(res.error || "عجز مالي في رصيد عهدة المسؤول المرتبط!", "error");
     }
   };
+
+  // ---- المسودات المحفوظة (من غير أي خصم من العهدة) + نسخ الفواتير ----
+  const makePlaceholderVoucher = (): DraftVoucher => ({
+    id: "draft_init_" + Date.now(),
+    officialId: db.currentUser?.role === 'supervisor' ? (db.currentUser?.officialId || '') : '',
+    carId: "",
+    licenseDetails: "رسوم تجديد فحص قشرة طفاية وتأمين",
+    licenseLocation: "مرور عبود",
+    carLocation: "منيا القمح",
+    invoiceDate: new Date().toISOString().split('T')[0],
+    items: [
+      { id: "init_row_" + Date.now(), description: "رسوم فحص فني وبيئي وتجديد طفايات حريق", paymentMethod: 'cash', accountId: '', amount: 1000 }
+    ]
+  });
+
+  const removeVoucherFromSession = (voucherId: string) => {
+    setDraftVouchers(prev => {
+      const next = prev.filter(v => v.id !== voucherId);
+      return next.length > 0 ? next : [makePlaceholderVoucher()];
+    });
+  };
+
+  // زرار "حفظ كمسودة": بيحفظ الاستمارة في قاعدة البيانات من غير خصم ولا إرسال للمالية
+  const handleSaveVoucherAsDraft = (voucherId: string) => {
+    const voucher = draftVouchers.find(v => v.id === voucherId);
+    if (!voucher) return;
+    if (!voucher.invoiceDate) {
+      showStatus("حدد تاريخ الفاتورة الأول.", "error");
+      return;
+    }
+    const hasContent = !!voucher.carId || voucher.items.some(i => (i.description || '').trim() || i.amount > 0);
+    if (!hasContent) {
+      showStatus("اكتب بند واحد على الأقل أو اختار السيارة قبل حفظ المسودة.", "error");
+      return;
+    }
+    const res = db.saveInvoiceDraft(
+      voucher.savedDraftId || null,
+      {
+        invoice_date: voucher.invoiceDate,
+        official_id: voucher.officialId,
+        car_id: voucher.carId || undefined,
+        license_details: voucher.licenseDetails,
+        license_location: voucher.licenseLocation,
+        car_location: voucher.carLocation
+      },
+      voucher.items.map(i => ({ description: i.description, amount: i.amount, payment_method: i.paymentMethod, account_id: i.accountId }))
+    );
+    if (!res.success) {
+      showStatus(res.error || "تعذّر حفظ المسودة.", "error");
+      return;
+    }
+    removeVoucherFromSession(voucherId);
+    setInvoiceView('saved_drafts');
+    showStatus("تم حفظ المسودة. مفيش أي خصم من العهدة، وتقدر تفتحها وتعدّلها وتبعتها في أي وقت.", "success");
+  };
+
+  // فتح مسودة محفوظة للتعديل (الرأس والبنود) أو للإرسال النهائي
+  const handleEditSavedDraft = (inv: Invoice) => {
+    if (!draftVouchers.some(v => v.savedDraftId === inv.id)) {
+      const its = db.invoiceDraftItems
+        .filter(i => i.invoice_id === inv.id)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      const voucher: DraftVoucher = {
+        id: "draft_saved_" + Date.now(),
+        savedDraftId: inv.id,
+        officialId: inv.official_id || (db.currentUser?.role === 'supervisor' ? (db.currentUser?.officialId || '') : ''),
+        carId: inv.car_id || '',
+        licenseDetails: inv.license_details || '',
+        licenseLocation: inv.license_location || '',
+        carLocation: inv.car_location || '',
+        invoiceDate: inv.invoice_date,
+        items: its.length > 0
+          ? its.map(i => ({ id: i.id, description: i.description, paymentMethod: i.payment_method, accountId: i.account_id || '', amount: i.amount }))
+          : [{ id: "init_row_" + Date.now(), description: '', paymentMethod: 'cash' as const, accountId: '', amount: 0 }]
+      };
+      setDraftVouchers(prev => [voucher, ...prev]);
+    }
+    setInvoiceView('draft');
+  };
+
+  const handleDeleteSavedDraft = (inv: Invoice) => {
+    if (!window.confirm(`مسح المسودة نهائيًا؟ (مفيش لها أي أثر على العهدة)`)) return;
+    const res = db.deleteInvoiceDraft(inv.id);
+    if (!res.success) {
+      showStatus(res.error || "تعذّر مسح المسودة.", "error");
+      return;
+    }
+    setDraftVouchers(prev => {
+      const next = prev.filter(v => v.savedDraftId !== inv.id);
+      return next.length > 0 ? next : [makePlaceholderVoucher()];
+    });
+    showStatus("تم مسح المسودة.", "success");
+  };
+
+  // زرار "نسخ": بيفتح استمارة جديدة ببنود الفاتورة بس (من غير السيارة) عشان تختار سيارة جديدة وتعدّل
+  const handleCloneInvoice = (inv: Invoice) => {
+    const its = db.invoiceItems
+      .filter(i => i.invoice_id === inv.id)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    if (its.length === 0) {
+      showStatus("الفاتورة دي مفيهاش بنود تتنسخ.", "error");
+      return;
+    }
+    const stamp = Date.now();
+    const voucher: DraftVoucher = {
+      id: "draft_clone_" + stamp,
+      officialId: db.currentUser?.role === 'supervisor' ? (db.currentUser?.officialId || '') : '',
+      carId: "",
+      licenseDetails: "",
+      licenseLocation: "",
+      carLocation: "",
+      invoiceDate: new Date().toISOString().split('T')[0],
+      items: its.map((i, idx) => ({ id: "clone_" + stamp + "_" + idx, description: i.description, paymentMethod: i.payment_method, accountId: '', amount: i.amount }))
+    };
+    setDraftVouchers(prev => [voucher, ...prev]);
+    setInvoiceView('draft');
+    showStatus(`تم نسخ بنود الفاتورة ${inv.invoice_number}. اختار السيارة والمسؤول وعدّل البنود حسب الحاجة.`, "success");
+  };
+
+  // نسخ فاتورة من شاشة اعتماد الفواتير: الشاشة دي بتسيب الطلب في sessionStorage وتفتح هنا
+  React.useEffect(() => {
+    let cloneId: string | null = null;
+    try { cloneId = sessionStorage.getItem('elbanna_clone_invoice_id'); } catch { cloneId = null; }
+    if (!cloneId) return;
+    const inv = db.invoices.find(i => i.id === cloneId);
+    if (!inv) return; // البيانات لسه بتتحمّل: هيحاول تاني لما الفواتير تتغيّر
+    try { sessionStorage.removeItem('elbanna_clone_invoice_id'); } catch { /* ignore */ }
+    handleCloneInvoice(inv);
+  }, [db.invoices]);
 
 
   // --- SUB TAB 2: CUSTODY MANAGEMENT & CASH/VISA ACCOUNTS ---
@@ -953,6 +1092,11 @@ export const InvoicesTab: React.FC = () => {
   };
 
 
+  // المسودات المحفوظة: مستخدم التراخيص يشوف مسوداته بس، وباقي المستخدمين يشوفوا الكل
+  const visibleSavedDrafts = db.invoiceDrafts
+    .filter(d => db.currentUser?.role !== 'supervisor' || !d.official_id || d.official_id === db.currentUser?.officialId)
+    .sort((a, b) => (b.invoice_date || '').localeCompare(a.invoice_date || ''));
+
   const statusBanner = statusMsg.text ? (
     <div className={`p-4 rounded-xl border flex items-center gap-3 text-xs md:text-sm ${statusMsg.type === 'success' ? 'bg-emerald-900/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-900/10 border-rose-500/20 text-rose-400'}`}>
       {statusMsg.type === 'success' ? (
@@ -1259,7 +1403,7 @@ export const InvoicesTab: React.FC = () => {
           )}
 
           {/* شاشة عهد الصرف المفتوحة: اختيار العملية (مصروف ترخيص / أرشيف الفواتير) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 no-print">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 no-print">
             <button
               type="button"
               onClick={() => setInvoiceView('draft')}
@@ -1280,6 +1424,28 @@ export const InvoicesTab: React.FC = () => {
                 </h3>
                 <p className="text-[11px] md:text-xs text-slate-400 leading-relaxed">
                   يفتح شاشة "مسودة مصروفات ترخيص" بالحجم الكامل لتجهيز بنود الصرف للسيارة، وبعد "ترحيل وحفظ" تقفل الشاشة وترجع هنا.
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setInvoiceView('saved_drafts')}
+              className="group text-right bg-slate-900 hover:bg-amber-500/5 border border-amber-500/30 hover:border-amber-500 rounded-2xl p-6 transition-all shadow-lg flex items-start gap-4"
+              id="open_saved_drafts_btn"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                <Save className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-black text-slate-100 text-base md:text-lg flex items-center gap-2">
+                  المسودات
+                  {visibleSavedDrafts.length > 0 && (
+                    <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold">{visibleSavedDrafts.length}</span>
+                  )}
+                </h3>
+                <p className="text-[11px] md:text-xs text-slate-400 leading-relaxed">
+                  فواتير محفوظة كمسودة من غير خصم من العهدة — افتحها وعدّل الرأس والبنود وابعتها للمالية وقت ما تحب.
                 </p>
               </div>
             </button>
@@ -1552,13 +1718,24 @@ export const InvoicesTab: React.FC = () => {
                       <div className="font-mono text-slate-330">
                         مجموع قيمة الكارت: <span className="font-black text-emerald-400">{voucherTotal.toLocaleString()} ج.م</span>
                       </div>
-                      <button
-                        onClick={() => handleFinalizeSaveVoucher(v.id)}
-                        type="button"
-                        className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 hover:text-white font-extrabold px-5 py-2 rounded-lg transition-all shadow"
-                      >
-                        💾 ترحيل وحفظ الفاتورة وطباعة A5 بالفور
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => handleSaveVoucherAsDraft(v.id)}
+                          type="button"
+                          className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/40 font-extrabold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5"
+                          title="حفظ من غير خصم من العهدة وبدون إرسال للمالية — تقدر تعدّلها بعدين"
+                        >
+                          <Save className="w-4 h-4" />
+                          حفظ كمسودة
+                        </button>
+                        <button
+                          onClick={() => handleFinalizeSaveVoucher(v.id)}
+                          type="button"
+                          className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 hover:text-white font-extrabold px-5 py-2 rounded-lg transition-all shadow"
+                        >
+                          💾 حفظ وإرسال (ترحيل وطباعة A5)
+                        </button>
+                      </div>
                     </div>
 
                   </div>
@@ -1567,6 +1744,84 @@ export const InvoicesTab: React.FC = () => {
             </div>
           </div>
 
+              </div>
+            </div>
+          )}
+
+          {/* شاشة المسودات المحفوظة — بالحجم الكامل */}
+          {invoiceView === 'saved_drafts' && (
+            <div className="fixed inset-0 z-[45] bg-slate-950 overflow-auto mobile-fit no-print" style={{ direction: 'rtl' }} id="saved_drafts_fullscreen">
+              <div className="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 md:px-8 py-3 flex items-center justify-between gap-3">
+                <h2 className="font-black text-slate-100 text-base md:text-xl flex items-center gap-2.5">
+                  <Save className="w-6 h-6 text-amber-400" />
+                  المسودات ({visibleSavedDrafts.length})
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setInvoiceView('home')}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  رجوع لشاشة عهد الصرف المفتوحة
+                </button>
+              </div>
+              <div className="p-4 md:p-8 space-y-4 max-w-[1200px] mx-auto">
+                {statusBanner}
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  المسودة مش بتخصم من العهدة ومش بتظهر للمالية ولا في التقارير. افتحها وعدّل أي حاجة، وبعدين اضغط "حفظ وإرسال" وقت ما تكون جاهزة.
+                </p>
+                {visibleSavedDrafts.length === 0 && (
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-10 text-center text-slate-400 font-bold text-sm">
+                    مفيش مسودات محفوظة. من استمارة "فتح مصروف ترخيص" اضغط "حفظ كمسودة".
+                  </div>
+                )}
+                {visibleSavedDrafts.map(d => {
+                  const dItems = db.invoiceDraftItems.filter(i => i.invoice_id === d.id);
+                  const dCar = db.cars.find(c => c.id === d.car_id);
+                  const dOfficial = db.officials.find(o => o.id === d.official_id);
+                  return (
+                    <div key={d.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-3 text-xs">
+                          <span className="font-black text-amber-300">مسودة</span>
+                          <span className="text-slate-400 font-mono">{String(d.invoice_date || '').slice(0, 10)}</span>
+                          <span className="font-bold text-emerald-400">{dCar ? dCar.car_number : 'لم تُحدد سيارة'}</span>
+                          <span className="font-semibold text-slate-300">{dOfficial ? dOfficial.name : 'لم يُحدد مسؤول'}</span>
+                        </div>
+                        <span className="font-black font-mono text-yellow-400">{d.total_amount.toLocaleString()} ج.م</span>
+                      </div>
+                      {(d.license_details || d.license_location) && (
+                        <p className="text-[11px] text-slate-400">{d.license_details}{d.license_location ? ` — ${d.license_location}` : ''}</p>
+                      )}
+                      <ul className="text-[11px] text-slate-300 space-y-0.5">
+                        {dItems.map(i => (
+                          <li key={i.id} className="flex justify-between gap-3">
+                            <span className="min-w-0 break-words">{i.description || 'بند بدون وصف'}</span>
+                            <span className="font-mono shrink-0">{i.amount.toLocaleString()}</span>
+                          </li>
+                        ))}
+                        {dItems.length === 0 && <li className="text-slate-500">لا توجد بنود بعد.</li>}
+                      </ul>
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => handleEditSavedDraft(d)}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 hover:text-white font-extrabold text-xs px-4 py-2 rounded-lg"
+                        >
+                          فتح وتعديل / إرسال
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSavedDraft(d)}
+                          className="bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-500/30 font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          مسح المسودة
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1733,6 +1988,16 @@ export const InvoicesTab: React.FC = () => {
                               >
                                 <Printer className="w-3.5 h-3.5" />
                               </button>
+                              {!inv.is_deleted && (
+                                <button
+                                  onClick={() => handleCloneInvoice(inv)}
+                                  type="button"
+                                  className="bg-indigo-900/20 text-indigo-300 hover:bg-indigo-900/40 p-1.5 rounded transition-all"
+                                  title="نسخ بنود الفاتورة في استمارة جديدة (بدون السيارة)"
+                                >
+                                  <Copy className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                               {!inv.is_deleted && inv.approval_status === 'returned' && (db.currentUser?.role !== 'supervisor' || inv.official_id === db.currentUser.officialId) && (
                                 <button
                                   onClick={() => {

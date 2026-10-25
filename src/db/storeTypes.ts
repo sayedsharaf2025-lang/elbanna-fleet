@@ -19,6 +19,9 @@ export interface DbContextType {
   cars: Car[];
   violations: Violation[];
   invoices: Invoice[];
+  // مسودات الفواتير: محفوظة في قاعدة البيانات لكن مالهاش أي أثر مالي، ومخفية من الفواتير والتقارير
+  invoiceDrafts: Invoice[];
+  invoiceDraftItems: InvoiceItem[];
   invoiceItems: InvoiceItem[];
   auditLogs: InvoiceAuditLog[];
   movements: DriverAccountMovement[];
@@ -140,6 +143,12 @@ export interface DbContextType {
     }
   ) => { success: boolean; error?: string };
   deleteInvoice: (invoiceId: string, supervisorName: string) => { success: boolean; error?: string };
+  saveInvoiceDraft: (
+    draftId: string | null,
+    data: { invoice_date: string; official_id: string; car_id?: string; license_details?: string; license_location?: string; car_location?: string },
+    items: { description: string; amount: number; payment_method: 'cash' | 'visa'; account_id?: string }[]
+  ) => { success: boolean; error?: string; draftId?: string };
+  deleteInvoiceDraft: (draftId: string) => { success: boolean; error?: string };
   restoreInvoice: (invoiceId: string, supervisorName: string) => { success: boolean; error?: string };
   purgeInvoice: (invoiceId: string, supervisorName: string) => { success: boolean; error?: string };
   saveDraftVouchers: (drafts: any[]) => Promise<void>;

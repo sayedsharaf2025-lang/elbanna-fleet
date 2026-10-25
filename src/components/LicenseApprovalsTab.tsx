@@ -5,7 +5,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { useDb } from '../db/store';
-import { FileCheck, Truck, User, CalendarDays, CheckCircle, AlertTriangle, Search, Lock, Wallet } from 'lucide-react';
+import { FileCheck, Truck, User, CalendarDays, CheckCircle, AlertTriangle, Search, Lock, Wallet, Copy, Trash2 } from 'lucide-react';
 
 // شاشة المالية: أي فاتورة ترخيص جديدة بتظهر هنا كطلب "قيد الموافقة". لحظة الموافقة بيتخصم
 // المبلغ من عهدة المسؤول وبيتحمّل على تكلفة السيارة، وبعدها الفاتورة بتتقفل (التعديل لأدمن البرنامج بس)
@@ -20,7 +20,19 @@ export function LicenseApprovalsTab() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const statusOf = (inv: { approval_status?: 'pending' | 'approved' | 'returned' }) => inv.approval_status || 'approved';
+  const statusOf = (inv: { approval_status?: 'draft' | 'pending' | 'approved' | 'returned' }) => inv.approval_status || 'approved';
+
+  // الفاتورة المعتمدة التعديل والحذف عليها لأدمن البرنامج بس (نفس قاعدة النظام الحالية)
+  const isAdmin = db.currentUser?.role === 'admin';
+
+  // "نسخ الفاتورة" بيفتح شاشة عهد الصرف، فبنعرضه بس لمن عنده صلاحية الشاشة دي
+  const canOpenInvoices = (() => {
+    const u = db.currentUser;
+    if (!u) return false;
+    const live = db.systemUsers?.find(x => x.id === u.systemUserId);
+    const screens = live ? live.allowed_screens : (u.allowedScreens || []);
+    return screens.includes('custody_licensing');
+  })();
 
   const pending = useMemo(
     () => db.invoices.filter(i => !i.is_deleted && statusOf(i) === 'pending')
@@ -76,6 +88,25 @@ export function LicenseApprovalsTab() {
     const res = db.returnInvoice(invoiceId, reason);
     if (res.success) showToast(`تم إرجاع الفاتورة ${number} لمستخدم التراخيص بالسبب المكتوب.`, true);
     else showToast(res.error || 'تعذّر إرجاع الفاتورة.', false);
+  };
+
+  // حذف فاتورة: قيد الموافقة/مرتجعة بتتلغي بدون أثر مالي، والمعتمدة بيتسترد مبلغها كامل لحسابات العهدة
+  // ويتسجّل في كشف العهدة حركة استرداد (بنفس منطق الحذف في أرشيف الفواتير)
+  const handleDelete = (invoiceId: string, number: string, total: number, wasApproved: boolean) => {
+    const msg = wasApproved
+      ? `حذف الفاتورة المعتمدة ${number}؟\nهيتم استرداد ${total.toLocaleString()} ج.م كاملة لحسابات العهدة وتتسجل حركة استرداد في كشف العهدة، وتتشال تكلفة الترخيص من السيارة.`
+      : `إلغاء وحذف الفاتورة ${number}؟ (لسه ماتخصمتش من العهدة فمفيش استرداد)`;
+    if (!window.confirm(msg)) return;
+    const actor = db.currentUser?.name || db.currentUser?.username || 'المالية';
+    const res = db.deleteInvoice(invoiceId, actor);
+    if (res.success) showToast(wasApproved ? `تم حذف الفاتورة ${number} واسترداد ${total.toLocaleString()} ج.م للعهدة.` : `تم إلغاء الفاتورة ${number}.`, true);
+    else showToast(res.error || 'تعذّر حذف الفاتورة.', false);
+  };
+
+  // نسخ فاتورة: بنسيب الطلب وبنفتح شاشة عهد الصرف (استمارة جديدة ببنود الفاتورة بس، من غير السيارة)
+  const handleClone = (invoiceId: string) => {
+    try { sessionStorage.setItem('elbanna_clone_invoice_id', invoiceId); } catch { /* ignore */ }
+    window.dispatchEvent(new CustomEvent('elbanna:navigate', { detail: { tab: 'custody_licensing' } }));
   };
 
   const list = (tab === 'pending' ? pending : tab === 'returned' ? returned : approved).filter(matches);
@@ -167,6 +198,21 @@ export function LicenseApprovalsTab() {
                   <Lock className="w-3.5 h-3.5" /> معتمدة{inv.approved_by ? ` بواسطة ${inv.approved_by}` : ''}{inv.approved_at ? ` في ${inv.approved_at.split('T')[0]}` : ''} — مقفولة للتعديل (أدمن البرنامج فقط).
                 </p>
               )}
+
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+                {canOpenInvoices && (
+                  <button type="button" onClick={() => handleClone(inv.id)} className="bg-white border border-indigo-300 text-indigo-600 hover:bg-indigo-50 font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5" title="فتح استمارة جديدة ببنود الفاتورة (من غير السيارة)">
+                    <Copy className="w-3.5 h-3.5" /> نسخ الفاتورة
+                  </button>
+                )}
+                {(tab !== 'approved' || isAdmin) ? (
+                  <button type="button" onClick={() => handleDelete(inv.id, inv.invoice_number, inv.total_amount, tab === 'approved')} className="bg-white border border-rose-300 text-rose-600 hover:bg-rose-50 font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5">
+                    <Trash2 className="w-3.5 h-3.5" /> {tab === 'approved' ? 'حذف واسترداد للعهدة' : 'حذف الفاتورة'}
+                  </button>
+                ) : (
+                  <span className="text-[11px] text-slate-400">حذف الفاتورة المعتمدة (مع استرداد العهدة) لأدمن البرنامج فقط.</span>
+                )}
+              </div>
             </div>
           );
         })}

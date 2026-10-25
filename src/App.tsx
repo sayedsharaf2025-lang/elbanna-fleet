@@ -99,6 +99,19 @@ function DashboardLayout() {
   const [showPalette, setShowPalette] = useState(false);
   const [saveHint, setSaveHint] = useState<string | null>(null);
 
+  // تنقّل بين الشاشات من أي شاشة تانية (مثلًا نسخ فاتورة من شاشة الاعتماد بيفتح شاشة عهد الصرف)
+  useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const tab = (e as CustomEvent<{ tab?: string }>).detail?.tab;
+      if (tab) {
+        setActiveTab(tab as any);
+        setIsSidebarOpen(false);
+      }
+    };
+    window.addEventListener('elbanna:navigate', onNavigate);
+    return () => window.removeEventListener('elbanna:navigate', onNavigate);
+  }, []);
+
   // القايمة الجانبية على الموبايل = Drawer: Esc يقفلها، والصفحة اللي وراها ماتتحركش وهي مفتوحة
   useEffect(() => {
     if (!isSidebarOpen) return;
