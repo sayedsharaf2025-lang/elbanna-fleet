@@ -2,6 +2,10 @@ import {StrictMode, Suspense, lazy} from 'react';
 import {createRoot} from 'react-dom/client';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
+import { installNativePrint } from './utils/printHtml';
+
+// تطبيق الموبايل: window.print() يشتغل عن طريق شاشة الطباعة بتاعة أندرويد
+installNativePrint();
 
 // Safely patch ResizeObserver to prevent infinite loops causing browser freezes and lag on mobile viewports/iframes (especially with Recharts)
 if (typeof window !== 'undefined') {

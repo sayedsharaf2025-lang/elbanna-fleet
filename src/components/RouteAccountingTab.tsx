@@ -8,6 +8,7 @@ import React, { useMemo, useState } from 'react';
 import { useNavFocus } from '../hooks/useNavFocus';
 import { useDb } from '../db/store';
 import { TransportRequest, TransportRouteLegSmoke } from '../types';
+import { printHtmlDocument } from '../utils/printHtml';
 import {
   Search,
   CalendarDays,
@@ -145,9 +146,7 @@ export function RouteAccountingTab() {
       dateTo ? `إلى: ${dateTo}` : '',
     ].filter(Boolean).join(' — ') || 'كل الطلبات';
 
-    const win = window.open('', '_blank', 'width=1100,height=700');
-    if (!win) return;
-    win.document.write(`
+    const html = `
       <!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>كشف حساب خطوط السير</title>
       <style>
         body { font-family: 'Calibri','Cairo',Arial,sans-serif; direction: rtl; background:#fff; color:#111; font-size:12px; padding:24px; }
@@ -170,9 +169,8 @@ export function RouteAccountingTab() {
           </tr>`).join('')}
         </tbody><tfoot><tr><td colspan="7">الإجمالي الكلي</td><td>${grand.toLocaleString()} ج.م</td></tr></tfoot></table>
       </body></html>
-    `);
-    win.document.close(); win.focus();
-    setTimeout(() => win.print(), 300);
+    `;
+    printHtmlDocument(html, { title: 'كشف حساب خطوط السير', features: 'width=1100,height=700' });
   };
 
   return (

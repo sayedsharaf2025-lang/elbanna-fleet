@@ -7,6 +7,7 @@ import { escapeHtml } from '../utils/escapeHtml';
 import React, { useState } from 'react';
 import { useDb } from '../db/store';
 import { Car } from '../types';
+import { printHtmlDocument } from '../utils/printHtml';
 import {
   ShieldAlert,
   Search,
@@ -330,9 +331,6 @@ export const LicenseDashboardTab: React.FC = () => {
     const supervisorObj = db.officials.find(o => o.id === car.license_official_id);
     const licStatus = getLicenseStatus(car);
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
     const html = `<!DOCTYPE html>
 <html dir="rtl" lang="ar">
 <head>
@@ -396,12 +394,10 @@ export const LicenseDashboardTab: React.FC = () => {
     <p>وثيقة رسمية — نظام إدارة أسطول البنا | تم الإصدار بتاريخ ${new Date().toLocaleDateString('ar-EG')} ${new Date().toLocaleTimeString('ar-EG')}</p>
   </div>
 </div>
-<script>window.onload = function() { window.print(); }</script>
 </body>
 </html>`;
 
-    printWindow.document.write(html);
-    printWindow.document.close();
+    printHtmlDocument(html, { title: `فاتورة ترخيص - ${car.car_number}` });
   };
 
   // Filter cars for license invoice search

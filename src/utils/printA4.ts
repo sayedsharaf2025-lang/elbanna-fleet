@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { printHtmlDocument } from './printHtml';
+
 // قالب طباعة A4 موحّد للتقارير (الربحية، الفواتير، العهد): رأس فيه اسم الشركة وعنوان التقرير والفترة،
 // وتذييل فيه تاريخ الطباعة واسم المستخدم. الرأس والتذييل بيتكرروا على كل صفحة (thead/tfoot).
 
@@ -107,12 +109,9 @@ ${opts.notes ? `<div class="notes">${esc(opts.notes)}</div>` : ''}
 // فتح نافذة طباعة بالقالب
 export function printA4Report(opts: A4ReportOptions): boolean {
   if (typeof window === 'undefined') return false;
-  const win = window.open('', '_blank', 'width=1100,height=750');
-  if (!win) return false;
-  const html = buildA4ReportHtml(opts);
-  win.document.write(html);
-  win.document.close();
-  win.focus();
-  setTimeout(() => win.print(), 350);
-  return true;
+  return printHtmlDocument(buildA4ReportHtml(opts), {
+    title: opts.title,
+    landscape: opts.orientation === 'landscape',
+    features: 'width=1100,height=750',
+  });
 }
