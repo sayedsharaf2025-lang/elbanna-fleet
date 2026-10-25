@@ -494,3 +494,28 @@ body {
     overflow-wrap: anywhere;
   }
 }
+
+/* MOBILE-FIRST-GLOBAL — تحسينات عامة للموبايل (أقل من 768px) على كل الشاشات */
+@media screen and (max-width: 767px) {
+  /* الجداول: سكرول أفقي بدل ما توسّع الصفحة */
+  #root table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* الصفوف اللي فيها عنصرين على الأطراف: لو ضاقت المساحة العنصر ينزل سطر جديد بدل ما يتراكب */
+  #root .flex.justify-between {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  /* الشبكات الضيقة: عمودين بالكتير بدل 3 و4 و5 و6 */
+  #root :is(.grid-cols-3, .grid-cols-4, .grid-cols-5, .grid-cols-6) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* الأزرار ماتزيدش عن عرض الشاشة والنص الطويل ينزل سطر */
+  #root button {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+}

@@ -98,6 +98,21 @@ function DashboardLayout() {
   const [showConsole, setShowConsole] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [saveHint, setSaveHint] = useState<string | null>(null);
+
+  // القايمة الجانبية على الموبايل = Drawer: Esc يقفلها، والصفحة اللي وراها ماتتحركش وهي مفتوحة
+  useEffect(() => {
+    if (!isSidebarOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsSidebarOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isSidebarOpen]);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // Enforce redirection to allowed tabs as role switches or updates
@@ -280,8 +295,8 @@ function DashboardLayout() {
       
       {/* Corporate Header Ribbon */}
       <header className="bg-slate-900/80 backdrop-blur-sm border-b border-slate-800 sticky top-0 z-40 no-print" id="elbanna_main_header">
-        <div className="max-w-7xl mx-auto px-4 md:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-3 md:px-6 min-h-16 py-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <div className="flex items-center gap-3 min-w-0">
             {/* Mobile Sidebar toggle */}
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -292,18 +307,18 @@ function DashboardLayout() {
             </button>
 
             {/* Branding Logo */}
-            <div className="flex items-center gap-2">
-              <span className="w-8 h-8 rounded-xl bg-emerald-500 flex items-center justify-center font-black text-slate-950 text-base shadow">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-8 h-8 shrink-0 rounded-xl bg-emerald-500 flex items-center justify-center font-black text-slate-950 text-base shadow">
                 بـ
               </span>
-              <div>
+              <div className="min-w-0">
                 <h1 className="font-extrabold text-slate-100 text-sm md:text-base leading-none">مجموعة البنا جروب</h1>
-                <p className="text-[10px] text-emerald-400 font-semibold mt-0.5">البوابة الرقمية لإدارة الأسطول والعهد المالية</p>
+                <p className="hidden sm:block text-[10px] text-emerald-400 font-semibold mt-0.5">البوابة الرقمية لإدارة الأسطول والعهد المالية</p>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center justify-end gap-2 md:gap-4 min-w-0">
             <NotificationBell onNavigate={(screen) => { setActiveTab(screen as any); setIsSidebarOpen(false); }} />
             {/* مؤشر حالة المزامنة مع السحابة */}
             <div
@@ -315,9 +330,9 @@ function DashboardLayout() {
             </div>
 
             {/* User status & Logout */}
-            <div className="flex items-center gap-3 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
+            <div className="flex items-center gap-2 md:gap-3 bg-slate-950 px-2.5 md:px-3 py-1.5 rounded-lg border border-slate-800 text-xs max-w-full">
               <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
-              <span className="text-slate-300 font-extrabold whitespace-nowrap">
+              <span className="text-slate-300 font-extrabold whitespace-nowrap truncate max-w-[120px] md:max-w-none">
                 {`👤 ${db.currentUser?.name || db.currentUser?.username}`}
               </span>
               <button
@@ -354,7 +369,7 @@ function DashboardLayout() {
               className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 ${showConsole ? 'bg-emerald-500 border-emerald-450 text-slate-950 shadow shadow-emerald-500/20 font-extrabold' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}
             >
               <Database className="w-4 h-4" />
-              <span>{showConsole ? 'إغلاق الكونسول' : 'محرر ومراقب Supabase'}</span>
+              <span className="hidden sm:inline">{showConsole ? 'إغلاق الكونسول' : 'محرر ومراقب Supabase'}</span>
             </button>
 
             {/* Database resetting safety hatch */}
@@ -380,12 +395,22 @@ function DashboardLayout() {
       {/* Main layout frame */}
       <div className="flex-1 flex max-w-7xl w-full mx-auto px-4 md:px-6 py-6 gap-6 relative">
         
-        {/* Navigation Sidebar Drawer */}
-        <aside 
-          className={`lg:w-72 bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col justify-between h-[80vh] shrink-0 sticky top-24 no-print transition-all duration-300 md:translate-x-0 ${isSidebarOpen ? 'fixed right-4 left-4 top-20 z-50 translate-x-0 bg-slate-900' : 'hidden lg:flex'}`}
+        {/* خلفية معتمة ورا القايمة على الموبايل — الضغط عليها يقفل القايمة */}
+        {isSidebarOpen && (
+          <div
+            className="fixed inset-0 z-[55] bg-black/60 lg:hidden no-print"
+            onClick={() => setIsSidebarOpen(false)}
+            aria-hidden="true"
+            id="elbanna_sidebar_backdrop"
+          />
+        )}
+
+        {/* Navigation Sidebar: Drawer بيطلع من اليمين على الموبايل، وعمود ثابت على الشاشات الكبيرة */}
+        <aside
+          className={`no-print bg-slate-900 border-slate-800 shadow-xl p-4 flex flex-col justify-between gap-3 transition-all duration-300 ease-out fixed top-0 bottom-0 right-0 z-[60] w-[85vw] max-w-xs border-l lg:border lg:rounded-2xl lg:sticky lg:top-24 lg:bottom-auto lg:right-auto lg:z-auto lg:w-72 lg:max-w-none lg:h-[80vh] lg:shrink-0 lg:translate-x-0 lg:visible ${isSidebarOpen ? 'translate-x-0 visible' : 'translate-x-full invisible'}`}
           id="elbanna_sidebar"
         >
-          <div className="space-y-4 overflow-y-auto min-h-0">
+          <div className="space-y-4 overflow-y-auto min-h-0 flex-1">
             <div className="flex justify-end items-center lg:hidden border-b border-slate-800 pb-2">
               <button onClick={() => setIsSidebarOpen(false)} type="button" className="p-1 hover:bg-slate-800 rounded text-slate-400">
                 <X className="w-5 h-5" />
