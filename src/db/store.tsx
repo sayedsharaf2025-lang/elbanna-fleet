@@ -363,41 +363,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
   const consumeNav = (nonce: number) => setPendingNav(prev => (prev && prev.nonce === nonce ? null : prev));
 
-  // مزامنة الإشعارات مع السحابة كل 15 ثانية وعند رجوع الشاشة للواجهة (لو الجدول لسه ماتنشأش بيفضل محلي بس)
+  // مراجعة الإشعارات ومزامنتها محلياً فقط عند التحميل الأول، المزامنة الحية بتتم عبر Realtime (انظر useEffect بالأسفل)
   const notificationsRef = useRef(notifications);
   notificationsRef.current = notifications;
-  useEffect(() => {
-    const client = getSupabaseClient();
-    if (!client) return;
-    let busy = false;
-    const sync = async () => {
-      if (busy || !currentUserRef.current || isDownloadingRef.current || document.visibilityState === 'hidden') return;
-      busy = true;
-      try {
-        const since = new Date(Date.now() - 30 * 86400000).toISOString();
-        const { data, error } = await client.from('notifications').select('*').gte('created_at', since).order('created_at', { ascending: false }).limit(300);
-        if (error || !data) return;
-        const cloud = (data as any[]).map(normalizeNotification);
-        const local = notificationsRef.current;
-        const merged = pruneNotifications(mergeNotifications(local, cloud), Date.now());
-        const up = notificationsToUpload(merged, cloud);
-        if (up.length > 0) {
-          const { error: upErr } = await client.from('notifications').upsert(up);
-          if (upErr) console.warn('Supabase notifications upload error:', upErr.message);
-        }
-        if (JSON.stringify(merged) !== JSON.stringify(local)) setNotifications(merged);
-      } catch (e) {
-        console.warn('notifications sync failed', e);
-      } finally {
-        busy = false;
-      }
-    };
-    const timer = setInterval(sync, 15000);
-    const onVisible = () => { if (document.visibilityState === 'visible') sync(); };
-    document.addEventListener('visibilitychange', onVisible);
-    sync();
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
-  }, []);
 
   // ====== قسم الصيانة — مبني فوق قاعدة بيانات السيارات الحالية (car_id = Car.id)، بدون أي تكرار لبياناتها ======
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>(() => {
@@ -1312,7 +1280,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         supabase.from('driver_account_movements').select('*').order('date', { ascending: false }),
         supabase.from('custody_accounts').select('*'),
         supabase.from('custody_movements').select('*').order('date', { ascending: false }),
-        supabase.from('transport_requests').select('*').order('request_number', { ascending: false }),
+        supabase.from('transport_requests').select('*').order('request_number', { ascending: false }).limit(50),
         supabase.from('maintenance_requests').select('*').order('request_number', { ascending: false }),
         supabase.from('maintenance_invoices').select('*').order('invoice_number', { ascending: false }),
         supabase.from('car_daily_costs').select('*'),
@@ -2289,60 +2257,98 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (getSupabaseClient()) downloadCloudDataToLocal();
   }, [currentUser]);
 
-  // مزامنة خفيفة لطلبات النقل: سحب من السحابة كل 15 ثانية وعند رجوع الشاشة للواجهة، ورفع أي طلب محلي ناقص
-  // (عشان طلب اتسجل من تطبيق الموبايل يظهر في الموقع من غير ريفرش، والعكس)
-  const transportRequestsRef = useRef(transportRequests);
-  transportRequestsRef.current = transportRequests;
-  useEffect(() => {
+  // ====== المزامنة الحية (Realtime) والتحميل المتدرج (Pagination) لطلبات النقل والإشعارات ======
+  // استبدال المزامنة كل 15 ثانية (Polling) بمشتركي Realtime لتقليل استهلاك الكوتا في Supabase
+  // والسماح بمعالجة كميات كبيرة من البيانات (200+ سيارة) بكفاءة عالية.
+  const [hasMoreTransportRequests, setHasMoreTransportRequests] = useState(true);
+  const [isLoadingMoreRequests, setIsLoadingMoreRequests] = useState(false);
+
+  const loadMoreTransportRequests = async () => {
+    if (isDownloadingRef.current || !hasMoreTransportRequests || isLoadingMoreRequests) return;
     const client = getSupabaseClient();
     if (!client) return;
-    let busy = false;
-    const sync = async () => {
-      if (busy || !currentUserRef.current || isDownloadingRef.current || document.visibilityState === 'hidden') return;
-      busy = true;
-      try {
-        const { data, error } = await client.from('transport_requests').select('*').order('request_number', { ascending: false });
-        if (error || !data) return;
-        const cloudIds = new Set(data.map((r: any) => r.id));
-        const cloudRows = notDeleted('transport_requests', data as any[]);
-        let localOnly: any[] = notDeleted('transport_requests', transportRequestsRef.current).filter(r => !cloudIds.has(r.id));
-        // تعارض رقم الطلب: جهازين ولّدوا نفس الرقم (مثلًا 2610-0002) — نعيد ترقيم الطلب المحلي برقم متاح
-        const takenNumbers = new Set<string>((data as any[]).map(r => r.request_number));
-        const maxSeqFor = (prefix: string) => {
-          let m = 0;
-          [...(data as any[]), ...localOnly].forEach(r => {
-            const parts = String(r.request_number || '').split('-');
-            if (parts[0] === prefix) { const n = parseInt(parts[1] || '0', 10); if (!isNaN(n) && n > m) m = n; }
-          });
-          return m;
-        };
-        localOnly = localOnly.map(r => {
-          if (!takenNumbers.has(r.request_number)) { takenNumbers.add(r.request_number); return r; }
-          const prefix = String(r.request_number || '').split('-')[0] || '0000';
-          const next = `${prefix}-${String(maxSeqFor(prefix) + 1).padStart(4, '0')}`;
-          takenNumbers.add(next);
-          return { ...r, request_number: next };
+
+    setIsLoadingMoreRequests(true);
+    try {
+      const offset = transportRequests.length;
+      const limit = 50;
+      const { data, error } = await client
+        .from('transport_requests')
+        .select('*')
+        .order('request_number', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (error) throw error;
+      if (data && data.length > 0) {
+        const cloudRows = notDeleted('transport_requests', data as any[]).map(normalizeTransportRequest);
+        setTransportRequests(prev => {
+          const existingIds = new Set(prev.map(r => r.id));
+          const newRows = cloudRows.filter(r => !existingIds.has(r.id));
+          return [...prev, ...newRows].sort((a, b) => b.request_number.localeCompare(a.request_number));
         });
-        if (localOnly.length > 0) {
-          const { error: upErr } = await upsertTransportRows(client, localOnly as any[]);
-          if (upErr) setCloudError(`تعذر رفع الطلبات للسحابة: ${upErr.message}`);
-        }
-        const merged = [...cloudRows, ...localOnly].map((r: any) => normalizeTransportRequest(r));
-        const sameShape = JSON.stringify([...merged].sort((a: any, b: any) => a.id.localeCompare(b.id))) ===
-          JSON.stringify([...transportRequestsRef.current].sort((a: any, b: any) => a.id.localeCompare(b.id)));
-        if (!sameShape) setTransportRequests(merged as any);
-      } catch (e) {
-        console.warn('transport_requests sync failed', e);
-      } finally {
-        busy = false;
+        if (data.length < limit) setHasMoreTransportRequests(false);
+      } else {
+        setHasMoreTransportRequests(false);
       }
+    } catch (e) {
+      console.warn('Load more transport requests failed', e);
+    } finally {
+      setIsLoadingMoreRequests(false);
+    }
+  };
+
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client || !currentUser) return;
+
+    // 1. الاشتراك في تغييرات طلبات النقل
+    const requestsChannel = client.channel('transport_requests_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transport_requests' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newReq = normalizeTransportRequest(payload.new as any);
+          setTransportRequests(prev => {
+            if (prev.some(r => r.id === newReq.id)) return prev;
+            return [newReq, ...prev].sort((a, b) => b.request_number.localeCompare(a.request_number));
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const updatedReq = normalizeTransportRequest(payload.new as any);
+          setTransportRequests(prev => prev.map(r => r.id === updatedReq.id ? updatedReq : r));
+        } else if (payload.eventType === 'DELETE') {
+          const deletedId = payload.old.id;
+          setTransportRequests(prev => prev.filter(r => r.id !== deletedId));
+        }
+      })
+      .subscribe();
+
+    // 2. الاشتراك في تغييرات الإشعارات
+    const notificationsChannel = client.channel('notifications_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newNotif = normalizeNotification(payload.new as any);
+          setNotifications(prev => {
+            if (prev.some(n => n.id === newNotif.id)) return prev;
+            const merged = pruneNotifications(mergeNotifications(prev, [newNotif]), Date.now());
+            return merged;
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const updatedNotif = normalizeNotification(payload.new as any);
+          setNotifications(prev => prev.map(n => n.id === updatedNotif.id ? updatedNotif : n));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      client.removeChannel(requestsChannel);
+      client.removeChannel(notificationsChannel);
     };
-    const timer = setInterval(sync, 15000);
-    const onVisible = () => { if (document.visibilityState === 'visible') sync(); };
-    document.addEventListener('visibilitychange', onVisible);
-    sync();
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, [currentUser]);
+
+  // حذف موازنة setInterval القديمة لطلبات النقل والإشعارات
+  /*
+  useEffect(() => {
+    // ... التنبيهات والطلبات كانت بتتحدّث هنا كل 15 ثانية ...
   }, []);
+  */
 
   // RESET STORE TO INITIAL
   const resetToInitial = () => {

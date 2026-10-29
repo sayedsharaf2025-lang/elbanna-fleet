@@ -104,7 +104,7 @@ export function TransportRequestsTab() {
 
   const trackResults = React.useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return [];
+    if (!q) return db.transportRequests;
     return db.transportRequests
       .filter(r =>
         r.request_number.toLowerCase().includes(q) ||
@@ -333,15 +333,9 @@ export function TransportRequestsTab() {
             />
           </div>
 
-          {searchQuery.trim() === '' && (
+          {trackResults.length === 0 && (
             <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm text-center text-slate-400 text-xs font-bold">
-              اكتب رقم الطلب أو اسم المزرعة أو التاريخ لعرض نتائج المتابعة.
-            </div>
-          )}
-
-          {searchQuery.trim() !== '' && trackResults.length === 0 && (
-            <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm text-center text-slate-400 text-xs font-bold">
-              لا توجد طلبات مطابقة لبحثك.
+              {searchQuery.trim() === '' ? 'لا توجد طلبات نقل مسجلة حاليًا.' : 'لا توجد طلبات مطابقة لبحثك.'}
             </div>
           )}
 
@@ -382,6 +376,17 @@ export function TransportRequestsTab() {
               );
             })}
           </div>
+
+          {db.hasMoreTransportRequests && (
+            <button
+              type="button"
+              onClick={() => db.loadMoreTransportRequests()}
+              disabled={db.isLoadingMoreRequests}
+              className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg mx-auto mt-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              {db.isLoadingMoreRequests ? 'جاري التحميل...' : 'تحميل المزيد'}
+            </button>
+          )}
         </div>
       )}
     </div>

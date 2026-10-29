@@ -30,6 +30,9 @@ export interface DbContextType {
 
   // Transport Requests (طلبات النقل)
   transportRequests: TransportRequest[];
+  hasMoreTransportRequests: boolean;
+  isLoadingMoreRequests: boolean;
+  loadMoreTransportRequests: () => Promise<void>;
   farms: string[];
   addTransportRequest: (data: {
     requester_name: string;

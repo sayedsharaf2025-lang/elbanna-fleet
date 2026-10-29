@@ -492,6 +492,17 @@ export function RequestsTrackingTab() {
         })}
       </div>
 
+      {db.hasMoreTransportRequests && (
+        <button
+          type="button"
+          onClick={() => db.loadMoreTransportRequests()}
+          disabled={db.isLoadingMoreRequests}
+          className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg mx-auto mt-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+        >
+          {db.isLoadingMoreRequests ? 'جاري التحميل...' : 'تحميل المزيد'}
+        </button>
+      )}
+
       {/* Respond with Car Modal */}
       {openRequest && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
