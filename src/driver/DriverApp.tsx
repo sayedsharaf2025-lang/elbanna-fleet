@@ -21,7 +21,9 @@ import type { TransportRequest } from '../types';
 const SESSION_KEY = 'elbanna_driver_session';
 const FAIL_KEY = 'elbanna_driver_login_fails';
 // تطبيق السائق مالوش جلسة Supabase Auth فمايقدرش يستخدم Realtime: Polling كل 45 ثانية (+ تحديث فوري عند رجوع الشاشة أو عودة النت)
-const POLL_MS = 45000;
+const POLL_MS = 45000;          // سائق مستني تكليف: تنبيه الطلب الجديد لازم يوصل بسرعة معقولة
+const POLL_BUSY_MS = 120000;    // سائق في رحلة جارية: هو اللي بيحدّث الشاشة بنفسه بعد كل خطوة، فمفيش داعي للسؤال كتير
+const POLL_MAX_BACKOFF_MS = 300000; // عند فشل متكرر (نت ضعيف/سيرفر) نبطّئ لحد 5 دقايق بدل ما نفضل نزن
 
 const loadSession = (): DriverSession | null => {
   try {
@@ -137,16 +139,18 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
   const [banner, setBanner] = useState<TransportRequest | null>(null);
   const seen = useRef<Set<string> | null>(null);
   const loading = useRef(false);
+  const snapRef = useRef<TripsSnapshot | null>(null);
+  snapRef.current = snap;
 
   const showToast = (type: 'success' | 'error', text: string) => { setToast({ type, text }); setTimeout(() => setToast(null), 4000); };
 
-  const load = useCallback(async () => {
-    if (loading.current) return;
+  const load = useCallback(async (): Promise<boolean> => {
+    if (loading.current) return true; // فيه تحميل شغال بالفعل
     loading.current = true;
     const res = await fetchTrips(session);
     loading.current = false;
-    if (isSessionInvalid(res)) { onLogout('انتهت الجلسة أو اتغيّر الرقم السري — سجّل الدخول من جديد.'); return; }
-    if (!res.ok || !res.data) { setError(res.error || 'تعذر تحميل الرحلات.'); return; }
+    if (isSessionInvalid(res)) { onLogout('انتهت الجلسة أو اتغيّر الرقم السري — سجّل الدخول من جديد.'); return true; }
+    if (!res.ok || !res.data) { setError(res.error || 'تعذر تحميل الرحلات.'); return false; }
     const data = res.data;
     setError(null);
     setSnap(data);
@@ -154,7 +158,7 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
     // أول تحميل: بس نسجّل الموجود. بعد كده أي طلب جديد بيتنبّه بيه (بانر + صوت + اهتزاز)
     if (seen.current === null) {
       seen.current = new Set(data.open.map(t => t.id));
-      return;
+      return true;
     }
     const fresh = newAssignments(seen.current, data.open);
     data.open.forEach(t => seen.current!.add(t.id));
@@ -163,21 +167,51 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
       const t = fresh[0];
       alertUser('طلب جديد', `${t.request_number} — ${[t.farm_name, ...(t.destinations || [])].join(' ← ')}`);
     }
+    return true;
   }, [session.token]);
 
   useEffect(() => {
     // لو المكتب لغى دخول السائق أو حذفه يتسجل خروجه
     verifySession(session).then(r => { if (r.ok && r.data === false) onLogout('تم إيقاف دخولك للتطبيق — كلّم المكتب.'); });
-    load();
-    const timer = setInterval(load, POLL_MS);
-    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
-    const onOnline = () => { setOnline(true); load(); };
-    const onOffline = () => setOnline(false);
+    // Polling تكيّفي: بيوقف تمامًا لما التطبيق في الخلفية أو الشاشة مقفولة، ويستأنف فورًا (مع تحديث) عند الرجوع،
+    // وبيبطّأ لما السائق في رحلة جارية أو لما الطلبات بتفشل. ده بيقلل استدعاءات الـ Edge Function بشكل كبير مع عدد سائقين كبير.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+    let failures = 0;
+    const nextDelay = () => {
+      if (failures > 0) return Math.min(POLL_MAX_BACKOFF_MS, POLL_MS * 2 ** failures);
+      return snapRef.current && bucketTrips(snapRef.current.open).current ? POLL_BUSY_MS : POLL_MS;
+    };
+    const schedule = () => {
+      if (stopped || document.visibilityState === 'hidden') return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(tickPoll, nextDelay());
+    };
+    const tickPoll = async () => {
+      if (stopped || document.visibilityState === 'hidden' || !navigator.onLine) return;
+      const ok = await load();
+      failures = ok ? 0 : failures + 1;
+      schedule();
+    };
+    const refreshNow = async () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      const ok = await load();
+      failures = ok ? 0 : failures + 1;
+      schedule();
+    };
+    refreshNow();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshNow();
+      else if (timer) { clearTimeout(timer); timer = null; }
+    };
+    const onOnline = () => { setOnline(true); refreshNow(); };
+    const onOffline = () => { setOnline(false); if (timer) { clearTimeout(timer); timer = null; } };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     return () => {
-      clearInterval(timer);
+      stopped = true;
+      if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
