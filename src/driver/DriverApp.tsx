@@ -20,8 +20,8 @@ import type { TransportRequest } from '../types';
 // تطبيق السائق: دخول بكود السائق + رقم سري ← استلام الطلب كإشعار ← قبول ← وصول التحميل ← استلام ← وصول الوجهة ← الجراج ← انتهاء بالعداد والدخان المتوقع.
 const SESSION_KEY = 'elbanna_driver_session';
 const FAIL_KEY = 'elbanna_driver_login_fails';
-// تطبيق السائق مالوش جلسة Supabase Auth فمايقدرش يستخدم Realtime: Polling كل 45 ثانية (+ تحديث فوري عند رجوع الشاشة أو عودة النت)
-const POLL_MS = 45000;
+// تطبيق السائق مالوش Polling خالص: بيحمّل الطلبات عند الفتح وعند الرجوع للتطبيق وبعد كل خطوة ينفّذها السائق، وبالزرار (تحديث).
+// ده بيمنع استهلاك الـ Edge Function مع عدد سائقين كبير.
 
 const loadSession = (): DriverSession | null => {
   try {
@@ -137,16 +137,17 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
   const [banner, setBanner] = useState<TransportRequest | null>(null);
   const seen = useRef<Set<string> | null>(null);
   const loading = useRef(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const showToast = (type: 'success' | 'error', text: string) => { setToast({ type, text }); setTimeout(() => setToast(null), 4000); };
 
-  const load = useCallback(async () => {
-    if (loading.current) return;
+  const load = useCallback(async (): Promise<boolean> => {
+    if (loading.current) return true; // فيه تحميل شغال بالفعل
     loading.current = true;
     const res = await fetchTrips(session);
     loading.current = false;
-    if (isSessionInvalid(res)) { onLogout('انتهت الجلسة أو اتغيّر الرقم السري — سجّل الدخول من جديد.'); return; }
-    if (!res.ok || !res.data) { setError(res.error || 'تعذر تحميل الرحلات.'); return; }
+    if (isSessionInvalid(res)) { onLogout('انتهت الجلسة أو اتغيّر الرقم السري — سجّل الدخول من جديد.'); return true; }
+    if (!res.ok || !res.data) { setError(res.error || 'تعذر تحميل الرحلات.'); return false; }
     const data = res.data;
     setError(null);
     setSnap(data);
@@ -154,7 +155,7 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
     // أول تحميل: بس نسجّل الموجود. بعد كده أي طلب جديد بيتنبّه بيه (بانر + صوت + اهتزاز)
     if (seen.current === null) {
       seen.current = new Set(data.open.map(t => t.id));
-      return;
+      return true;
     }
     const fresh = newAssignments(seen.current, data.open);
     data.open.forEach(t => seen.current!.add(t.id));
@@ -163,13 +164,14 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
       const t = fresh[0];
       alertUser('طلب جديد', `${t.request_number} — ${[t.farm_name, ...(t.destinations || [])].join(' ← ')}`);
     }
+    return true;
   }, [session.token]);
 
   useEffect(() => {
     // لو المكتب لغى دخول السائق أو حذفه يتسجل خروجه
     verifySession(session).then(r => { if (r.ok && r.data === false) onLogout('تم إيقاف دخولك للتطبيق — كلّم المكتب.'); });
+    // بدون Polling: تحميل عند الفتح، وعند الرجوع للتطبيق بعد ما كان في الخلفية، وعند رجوع النت. الباقي بالزرار.
     load();
-    const timer = setInterval(load, POLL_MS);
     const onVisible = () => { if (document.visibilityState === 'visible') load(); };
     const onOnline = () => { setOnline(true); load(); };
     const onOffline = () => setOnline(false);
@@ -177,13 +179,18 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     return () => {
-      clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  };
 
   const run = async (trip: TransportRequest, action: TripAction, payload: { odometer?: number; expectedSmoke?: number } = {}): Promise<boolean> => {
     setBusy(true);
@@ -225,7 +232,7 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
             </p>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => load()} aria-label="تحديث" className="p-2.5 rounded-xl hover:bg-slate-800"><RefreshCw className="w-5 h-5" /></button>
+            <button type="button" onClick={refresh} disabled={refreshing} aria-label="تحديث" className="p-2.5 rounded-xl hover:bg-slate-800 disabled:opacity-60"><RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} /></button>
             <button type="button" onClick={() => { if (window.confirm('تسجيل الخروج؟')) onLogout(); }} aria-label="خروج" className="p-2.5 rounded-xl hover:bg-slate-800"><LogOut className="w-5 h-5" /></button>
           </div>
         </div>
@@ -243,6 +250,9 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
       )}
 
       <main className="p-4 space-y-4">
+        <button type="button" onClick={refresh} disabled={refreshing} className="w-full bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-white rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition-all">
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> {refreshing ? 'جاري التحديث...' : 'تحديث الطلبات'}
+        </button>
         {!snap && !error && <div className="text-center text-slate-400 font-bold text-sm py-16 flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> جاري التحميل...</div>}
 
         {buckets?.current && (

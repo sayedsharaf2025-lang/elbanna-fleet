@@ -2401,11 +2401,19 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     };
 
     // 1. الاشتراك في تغييرات طلبات النقل
-    let subscribedBefore = false;
-    const onStatus = (status: string) => {
-      if (status !== 'SUBSCRIBED') return;
-      if (subscribedBefore) catchUp(); // إعادة اتصال بعد انقطاع: نعوّض اللي فات
-      subscribedBefore = true;
+    // علَم لكل قناة لوحدها: لو كان مشترك بين القناتين، اشتراك القناة التانية أول مرة كان بيعمل مزامنة زيادة عند كل دخول.
+    // وكمان نمنع تكرار المزامنة لو القناتين رجعوا مع بعض بعد انقطاع.
+    let catchUpRunning = false;
+    const makeOnStatus = () => {
+      let subscribedBefore = false;
+      return (status: string) => {
+        if (status !== 'SUBSCRIBED') return;
+        if (subscribedBefore && !catchUpRunning) { // إعادة اتصال بعد انقطاع: نعوّض اللي فات
+          catchUpRunning = true;
+          catchUp().finally(() => { catchUpRunning = false; });
+        }
+        subscribedBefore = true;
+      };
     };
 
     const requestsChannel = client.channel('transport_requests_realtime')
@@ -2427,7 +2435,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             : [incoming, ...prev].sort(byRequestNumberDesc)));
         }
       })
-      .subscribe(onStatus);
+      .subscribe(makeOnStatus());
 
     // 2. الاشتراك في تغييرات الإشعارات (الدمج بيجمّع read_by من الطرفين)
     const notificationsChannel = client.channel('notifications_realtime')
@@ -2437,7 +2445,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         cloudNotificationsRef.current.set(incoming.id, incoming);
         setNotifications(prev => pruneNotifications(mergeNotifications(prev, [incoming]), Date.now()));
       })
-      .subscribe(onStatus);
+      .subscribe(makeOnStatus());
 
     // أول مزامنة + تعويض عند رجوع الشاشة للواجهة (الموبايل بيقفل الاتصال وهو في الخلفية)
     catchUp();
