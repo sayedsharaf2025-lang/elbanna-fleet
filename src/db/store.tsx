@@ -291,6 +291,12 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const [transportRequests, setTransportRequests] = useState<TransportRequest[]>(() =>
     loadSavedArray<TransportRequest>('elbanna_transport_requests', []).map(r => normalizeTransportRequest(r))
   );
+  const TRANSPORT_PAGE_SIZE = 50;
+  const [hasMoreTransportRequests, setHasMoreTransportRequests] = useState(true);
+  const [isLoadingMoreRequests, setIsLoadingMoreRequests] = useState(false);
+  const transportRequestsRef = useRef(transportRequests);
+  const cloudNotificationsRef = useRef<Map<string, AppNotification>>(new Map());
+  const notificationsSyncedRef = useRef(false);
 
   // ====== الإشعارات ======
   // كل حدث على طلب نقل/صيانة بيعمل إشعار، بيظهر لكل مستخدم عنده صلاحية على الشاشة المعنية، وبالضغط عليه
@@ -1280,7 +1286,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         supabase.from('driver_account_movements').select('*').order('date', { ascending: false }),
         supabase.from('custody_accounts').select('*'),
         supabase.from('custody_movements').select('*').order('date', { ascending: false }),
-        supabase.from('transport_requests').select('*').order('request_number', { ascending: false }).limit(50),
+        supabase.from('transport_requests').select('*').order('request_number', { ascending: false }).limit(TRANSPORT_PAGE_SIZE),
         supabase.from('maintenance_requests').select('*').order('request_number', { ascending: false }),
         supabase.from('maintenance_invoices').select('*').order('invoice_number', { ascending: false }),
         supabase.from('car_daily_costs').select('*'),
@@ -1562,6 +1568,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         const cloudIds = new Set(cloudRequests.map((r: any) => r.id));
         const localOnly = notDeleted('transport_requests', transportRequests).filter(r => !cloudIds.has(r.id));
         setTransportRequests([...cloudRequests, ...localOnly].map((r: any) => normalizeTransportRequest(r)));
+        setHasMoreTransportRequests(cloudRequests.length >= TRANSPORT_PAGE_SIZE);
       }
       if (resMaintenanceRequests.data) {
         const cloudReqs = resMaintenanceRequests.data;
@@ -2257,11 +2264,14 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     if (getSupabaseClient()) downloadCloudDataToLocal();
   }, [currentUser]);
 
-  // ====== المزامنة الحية (Realtime) والتحميل المتدرج (Pagination) لطلبات النقل والإشعارات ======
-  // استبدال المزامنة كل 15 ثانية (Polling) بمشتركي Realtime لتقليل استهلاك الكوتا في Supabase
-  // والسماح بمعالجة كميات كبيرة من البيانات (200+ سيارة) بكفاءة عالية.
-  const [hasMoreTransportRequests, setHasMoreTransportRequests] = useState(true);
-  const [isLoadingMoreRequests, setIsLoadingMoreRequests] = useState(false);
+  // ====== المزامنة الحية (Realtime) للمكتب + التحميل المتدرج (Pagination) لطلبات النقل والإشعارات ======
+  // المكتب (موظفين عندهم جلسة Supabase Auth) بيشتغل بـ Realtime بدل الـ Polling كل 15 ثانية.
+  // تطبيق السائق مالوش جلسة Auth (بيكلّم Edge Function) فبيعمل Polling كل 45 ثانية من DriverApp.
+  // أي انقطاع للاتصال بيتعوّض بمزامنة تعويضية عند إعادة الاشتراك أو رجوع الشاشة للواجهة.
+  transportRequestsRef.current = transportRequests;
+
+  const byRequestNumberDesc = (a: { request_number: string }, b: { request_number: string }) =>
+    String(b.request_number || '').localeCompare(String(a.request_number || ''));
 
   const loadMoreTransportRequests = async () => {
     if (isDownloadingRef.current || !hasMoreTransportRequests || isLoadingMoreRequests) return;
@@ -2270,13 +2280,12 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     setIsLoadingMoreRequests(true);
     try {
-      const offset = transportRequests.length;
-      const limit = 50;
-      const { data, error } = await client
-        .from('transport_requests')
-        .select('*')
-        .order('request_number', { ascending: false })
-        .range(offset, offset + limit - 1);
+      // تصفح بمؤشر (keyset): نكمّل من آخر رقم طلب محمّل بدل offset، عشان صفوف Realtime والمحلي ماتبوّظش الترتيب
+      const loaded = transportRequestsRef.current;
+      const cursor = loaded.length > 0 ? loaded.reduce((min, r) => (r.request_number < min ? r.request_number : min), loaded[0]!.request_number) : null;
+      let q = client.from('transport_requests').select('*').order('request_number', { ascending: false }).limit(TRANSPORT_PAGE_SIZE);
+      if (cursor) q = q.lt('request_number', cursor);
+      const { data, error } = await q;
 
       if (error) throw error;
       if (data && data.length > 0) {
@@ -2284,12 +2293,10 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         setTransportRequests(prev => {
           const existingIds = new Set(prev.map(r => r.id));
           const newRows = cloudRows.filter(r => !existingIds.has(r.id));
-          return [...prev, ...newRows].sort((a, b) => b.request_number.localeCompare(a.request_number));
+          return [...prev, ...newRows].sort(byRequestNumberDesc);
         });
-        if (data.length < limit) setHasMoreTransportRequests(false);
-      } else {
-        setHasMoreTransportRequests(false);
       }
+      if (!data || data.length < TRANSPORT_PAGE_SIZE) setHasMoreTransportRequests(false);
     } catch (e) {
       console.warn('Load more transport requests failed', e);
     } finally {
@@ -2297,58 +2304,152 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
+  // مزامنة تعويضية لأحدث صفحة من طلبات النقل: سحب من السحابة + رفع أي طلب محلي ناقص (أوفلاين/جهاز تاني)
+  // + حل تعارض رقم الطلب (جهازين ولّدوا نفس الرقم) بإعادة ترقيم الطلب المحلي. بتشتغل عند الدخول/إعادة الاتصال/رجوع الشاشة فقط.
+  const syncTransportFirstPage = async (client: any) => {
+    const { data, error } = await client.from('transport_requests').select('*').order('request_number', { ascending: false }).limit(TRANSPORT_PAGE_SIZE);
+    if (error || !data) return;
+    const rows = data as any[];
+    const cloudIds = new Set(rows.map(r => r.id));
+    // لو الصفحة كاملة، أي طلب محلي أقدم من آخر طلب فيها يعتبر موجود في السحابة (اتحمّل بالتصفح) وماينفعش يترفع من جديد
+    const oldestCloud = rows.length >= TRANSPORT_PAGE_SIZE ? String(rows[rows.length - 1].request_number || '') : '';
+    let localOnly: any[] = notDeleted('transport_requests', transportRequestsRef.current)
+      .filter(r => !cloudIds.has(r.id) && (!oldestCloud || r.request_number >= oldestCloud));
+
+    const takenNumbers = new Set<string>(rows.map(r => r.request_number));
+    const maxSeqFor = (prefix: string) => {
+      let m = 0;
+      [...rows, ...localOnly].forEach(r => {
+        const parts = String(r.request_number || '').split('-');
+        if (parts[0] === prefix) { const n = parseInt(parts[1] || '0', 10); if (!isNaN(n) && n > m) m = n; }
+      });
+      return m;
+    };
+    localOnly = localOnly.map(r => {
+      if (!takenNumbers.has(r.request_number)) { takenNumbers.add(r.request_number); return r; }
+      const prefix = String(r.request_number || '').split('-')[0] || '0000';
+      const next = `${prefix}-${String(maxSeqFor(prefix) + 1).padStart(4, '0')}`;
+      takenNumbers.add(next);
+      return { ...r, request_number: next };
+    });
+    if (localOnly.length > 0) {
+      const { error: upErr } = await upsertTransportRows(client, localOnly as any[]);
+      if (upErr) setCloudError(`تعذر رفع الطلبات للسحابة: ${upErr.message}`);
+    }
+    const localOnlyById = new Map(localOnly.map(r => [r.id, r]));
+    const cloudRows = notDeleted('transport_requests', rows);
+    setTransportRequests(prev => {
+      // نحتفظ بأي صف محلي مش في صفحة السحابة (أقدم منها أو اتضاف أثناء الطلب) ونطبّق عليه الترقيم الجديد لو اتغيّر
+      const keep = notDeleted('transport_requests', prev)
+        .filter(r => !cloudIds.has(r.id))
+        .map(r => localOnlyById.get(r.id) || r);
+      const merged = [...cloudRows, ...keep].map((r: any) => normalizeTransportRequest(r)).sort(byRequestNumberDesc);
+      const same = merged.length === prev.length &&
+        JSON.stringify([...merged].sort((a, b) => a.id.localeCompare(b.id))) === JSON.stringify([...prev].sort((a, b) => a.id.localeCompare(b.id)));
+      return same ? prev : merged;
+    });
+    if (rows.length < TRANSPORT_PAGE_SIZE) setHasMoreTransportRequests(false);
+  };
+
+  // مزامنة الإشعارات: جلب آخر 30 يوم + دمج مع المحلي + رفع الجديد/المقروء محليًا
+  const syncNotifications = async (client: any) => {
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const { data, error } = await client.from('notifications').select('*').gte('created_at', since).order('created_at', { ascending: false }).limit(300);
+    if (error || !data) return;
+    const cloud = (data as any[]).map(normalizeNotification);
+    cloudNotificationsRef.current = new Map(cloud.map(n => [n.id, n]));
+    const local = notificationsRef.current;
+    const merged = pruneNotifications(mergeNotifications(local, cloud), Date.now());
+    const up = notificationsToUpload(merged, cloud);
+    if (up.length > 0) {
+      const { error: upErr } = await client.from('notifications').upsert(up);
+      if (upErr) console.warn('Supabase notifications upload error:', upErr.message);
+      else up.forEach(n => cloudNotificationsRef.current.set(n.id, n));
+    }
+    notificationsSyncedRef.current = true;
+    if (JSON.stringify(merged) !== JSON.stringify(local)) setNotifications(merged);
+  };
+
+  // رفع الإشعارات الجديدة وحالة القراءة أول بأول (كانت بتترفع مع الـ Polling القديم)
+  useEffect(() => {
+    if (!currentUser || !notificationsSyncedRef.current) return;
+    const client = getSupabaseClient();
+    if (!client) return;
+    const timer = setTimeout(async () => {
+      const up = notificationsToUpload(notifications, Array.from(cloudNotificationsRef.current.values()));
+      if (up.length === 0) return;
+      const { error } = await client.from('notifications').upsert(up);
+      if (error) console.warn('Supabase notifications upload error:', error.message);
+      else up.forEach(n => cloudNotificationsRef.current.set(n.id, n));
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [notifications, currentUser]);
+
   useEffect(() => {
     const client = getSupabaseClient();
     if (!client || !currentUser) return;
+    notificationsSyncedRef.current = false;
+
+    const catchUp = async () => {
+      if (isDownloadingRef.current || document.visibilityState === 'hidden') return;
+      try {
+        await syncTransportFirstPage(client);
+        await syncNotifications(client);
+      } catch (e) {
+        console.warn('realtime catch-up sync failed', e);
+      }
+    };
 
     // 1. الاشتراك في تغييرات طلبات النقل
-    const requestsChannel = client.channel('transport_requests_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'transport_requests' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          const newReq = normalizeTransportRequest(payload.new as any);
-          setTransportRequests(prev => {
-            if (prev.some(r => r.id === newReq.id)) return prev;
-            return [newReq, ...prev].sort((a, b) => b.request_number.localeCompare(a.request_number));
-          });
-        } else if (payload.eventType === 'UPDATE') {
-          const updatedReq = normalizeTransportRequest(payload.new as any);
-          setTransportRequests(prev => prev.map(r => r.id === updatedReq.id ? updatedReq : r));
-        } else if (payload.eventType === 'DELETE') {
-          const deletedId = payload.old.id;
-          setTransportRequests(prev => prev.filter(r => r.id !== deletedId));
-        }
-      })
-      .subscribe();
+    let subscribedBefore = false;
+    const onStatus = (status: string) => {
+      if (status !== 'SUBSCRIBED') return;
+      if (subscribedBefore) catchUp(); // إعادة اتصال بعد انقطاع: نعوّض اللي فات
+      subscribedBefore = true;
+    };
 
-    // 2. الاشتراك في تغييرات الإشعارات
-    const notificationsChannel = client.channel('notifications_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, (payload) => {
+    const requestsChannel = client.channel('transport_requests_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transport_requests' }, (payload: any) => {
+        if (payload.eventType === 'DELETE') {
+          const deletedId = payload.old?.id;
+          if (deletedId) setTransportRequests(prev => prev.filter(r => r.id !== deletedId));
+          return;
+        }
+        // الصفوف المحذوفة (tombstones) ماترجعش تظهر
+        const row = notDeleted('transport_requests', [payload.new as any]);
+        if (row.length === 0) return;
+        const incoming = normalizeTransportRequest(row[0]);
         if (payload.eventType === 'INSERT') {
-          const newNotif = normalizeNotification(payload.new as any);
-          setNotifications(prev => {
-            if (prev.some(n => n.id === newNotif.id)) return prev;
-            const merged = pruneNotifications(mergeNotifications(prev, [newNotif]), Date.now());
-            return merged;
-          });
+          setTransportRequests(prev => (prev.some(r => r.id === incoming.id) ? prev : [incoming, ...prev].sort(byRequestNumberDesc)));
         } else if (payload.eventType === 'UPDATE') {
-          const updatedNotif = normalizeNotification(payload.new as any);
-          setNotifications(prev => prev.map(n => n.id === updatedNotif.id ? updatedNotif : n));
+          setTransportRequests(prev => (prev.some(r => r.id === incoming.id)
+            ? prev.map(r => (r.id === incoming.id ? incoming : r))
+            : [incoming, ...prev].sort(byRequestNumberDesc)));
         }
       })
-      .subscribe();
+      .subscribe(onStatus);
+
+    // 2. الاشتراك في تغييرات الإشعارات (الدمج بيجمّع read_by من الطرفين)
+    const notificationsChannel = client.channel('notifications_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications' }, (payload: any) => {
+        if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE') return;
+        const incoming = normalizeNotification(payload.new as any);
+        cloudNotificationsRef.current.set(incoming.id, incoming);
+        setNotifications(prev => pruneNotifications(mergeNotifications(prev, [incoming]), Date.now()));
+      })
+      .subscribe(onStatus);
+
+    // أول مزامنة + تعويض عند رجوع الشاشة للواجهة (الموبايل بيقفل الاتصال وهو في الخلفية)
+    catchUp();
+    const onVisible = () => { if (document.visibilityState === 'visible') catchUp(); };
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
+      document.removeEventListener('visibilitychange', onVisible);
       client.removeChannel(requestsChannel);
       client.removeChannel(notificationsChannel);
     };
-  }, [currentUser]);
-
-  // حذف موازنة setInterval القديمة لطلبات النقل والإشعارات
-  /*
-  useEffect(() => {
-    // ... التنبيهات والطلبات كانت بتتحدّث هنا كل 15 ثانية ...
-  }, []);
-  */
+  }, [currentUser?.username]);
 
   // RESET STORE TO INITIAL
   const resetToInitial = () => {
@@ -2371,6 +2472,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     ]);
     setCustodyMovements([]);
     setTransportRequests([]);
+    setHasMoreTransportRequests(true);
     setFarms([]);
     localStorage.removeItem('elbanna_transport_requests');
     localStorage.removeItem('elbanna_farms');
@@ -4878,6 +4980,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         custodyAccounts: custodyAccounts || [],
         custodyMovements: custodyMovements || [],
         transportRequests: transportRequests || [],
+        hasMoreTransportRequests,
+        isLoadingMoreRequests,
+        loadMoreTransportRequests,
         farms: farms || [],
         addTransportRequest,
         updateTransportRequest,

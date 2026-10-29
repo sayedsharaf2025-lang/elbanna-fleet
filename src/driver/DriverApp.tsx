@@ -20,7 +20,8 @@ import type { TransportRequest } from '../types';
 // تطبيق السائق: دخول بكود السائق + رقم سري ← استلام الطلب كإشعار ← قبول ← وصول التحميل ← استلام ← وصول الوجهة ← الجراج ← انتهاء بالعداد والدخان المتوقع.
 const SESSION_KEY = 'elbanna_driver_session';
 const FAIL_KEY = 'elbanna_driver_login_fails';
-const POLL_MS = 10000;
+// تطبيق السائق مالوش جلسة Supabase Auth فمايقدرش يستخدم Realtime: Polling كل 45 ثانية (+ تحديث فوري عند رجوع الشاشة أو عودة النت)
+const POLL_MS = 45000;
 
 const loadSession = (): DriverSession | null => {
   try {
