@@ -8,6 +8,27 @@
   </head>
   <body class="bg-gray-50 text-gray-900 selection:bg-indigo-500 selection:text-white">
     <div id="root"></div>
+    <script>
+      // تشخيص الصفحة البيضاء: لو التطبيق ماظهرش خلال 6 ثواني (أو حصل خطأ قبل ما React يشتغل) نعرض الخطأ ونسخة المتصفح بدل شاشة فاضية
+      (function () {
+        var errs = [];
+        function add(m) { errs.push(String(m)); if (errs.length > 8) errs.shift(); }
+        window.addEventListener('error', function (e) {
+          var t = e.target;
+          add(t && t !== window && (t.src || t.href) ? 'تعذر تحميل: ' + (t.src || t.href) : (e.message || 'خطأ') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : ''));
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) { add('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+        function show() {
+          var root = document.getElementById('root');
+          if (!root || root.childNodes.length > 0) return;
+          var d = document.createElement('div');
+          d.setAttribute('style', 'direction:ltr;padding:16px;font:13px/1.5 monospace;color:#b91c1c;white-space:pre-wrap;word-break:break-word');
+          d.textContent = 'App failed to start\n\n' + (errs.join('\n\n') || '(no JS error captured)') + '\n\nUA: ' + navigator.userAgent;
+          root.appendChild(d);
+        }
+        setTimeout(show, 6000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

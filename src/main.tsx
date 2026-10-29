@@ -5,7 +5,7 @@ import './index.css';
 import { installNativePrint } from './utils/printHtml';
 
 // تطبيق الموبايل: window.print() يشتغل عن طريق شاشة الطباعة بتاعة أندرويد
-installNativePrint();
+try { installNativePrint(); } catch (e) { console.warn('installNativePrint failed', e); }
 
 // Safely patch ResizeObserver to prevent infinite loops causing browser freezes and lag on mobile viewports/iframes (especially with Recharts)
 if (typeof window !== 'undefined') {
