@@ -20,10 +20,8 @@ import type { TransportRequest } from '../types';
 // تطبيق السائق: دخول بكود السائق + رقم سري ← استلام الطلب كإشعار ← قبول ← وصول التحميل ← استلام ← وصول الوجهة ← الجراج ← انتهاء بالعداد والدخان المتوقع.
 const SESSION_KEY = 'elbanna_driver_session';
 const FAIL_KEY = 'elbanna_driver_login_fails';
-// تطبيق السائق مالوش جلسة Supabase Auth فمايقدرش يستخدم Realtime: Polling كل 45 ثانية (+ تحديث فوري عند رجوع الشاشة أو عودة النت)
-const POLL_MS = 45000;          // سائق مستني تكليف: تنبيه الطلب الجديد لازم يوصل بسرعة معقولة
-const POLL_BUSY_MS = 120000;    // سائق في رحلة جارية: هو اللي بيحدّث الشاشة بنفسه بعد كل خطوة، فمفيش داعي للسؤال كتير
-const POLL_MAX_BACKOFF_MS = 300000; // عند فشل متكرر (نت ضعيف/سيرفر) نبطّئ لحد 5 دقايق بدل ما نفضل نزن
+// تطبيق السائق مالوش Polling خالص: بيحمّل الطلبات عند الفتح وعند الرجوع للتطبيق وبعد كل خطوة ينفّذها السائق، وبالزرار (تحديث).
+// ده بيمنع استهلاك الـ Edge Function مع عدد سائقين كبير.
 
 const loadSession = (): DriverSession | null => {
   try {
@@ -139,8 +137,7 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
   const [banner, setBanner] = useState<TransportRequest | null>(null);
   const seen = useRef<Set<string> | null>(null);
   const loading = useRef(false);
-  const snapRef = useRef<TripsSnapshot | null>(null);
-  snapRef.current = snap;
+  const [refreshing, setRefreshing] = useState(false);
 
   const showToast = (type: 'success' | 'error', text: string) => { setToast({ type, text }); setTimeout(() => setToast(null), 4000); };
 
@@ -173,51 +170,27 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
   useEffect(() => {
     // لو المكتب لغى دخول السائق أو حذفه يتسجل خروجه
     verifySession(session).then(r => { if (r.ok && r.data === false) onLogout('تم إيقاف دخولك للتطبيق — كلّم المكتب.'); });
-    // Polling تكيّفي: بيوقف تمامًا لما التطبيق في الخلفية أو الشاشة مقفولة، ويستأنف فورًا (مع تحديث) عند الرجوع،
-    // وبيبطّأ لما السائق في رحلة جارية أو لما الطلبات بتفشل. ده بيقلل استدعاءات الـ Edge Function بشكل كبير مع عدد سائقين كبير.
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let stopped = false;
-    let failures = 0;
-    const nextDelay = () => {
-      if (failures > 0) return Math.min(POLL_MAX_BACKOFF_MS, POLL_MS * 2 ** failures);
-      return snapRef.current && bucketTrips(snapRef.current.open).current ? POLL_BUSY_MS : POLL_MS;
-    };
-    const schedule = () => {
-      if (stopped || document.visibilityState === 'hidden') return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(tickPoll, nextDelay());
-    };
-    const tickPoll = async () => {
-      if (stopped || document.visibilityState === 'hidden' || !navigator.onLine) return;
-      const ok = await load();
-      failures = ok ? 0 : failures + 1;
-      schedule();
-    };
-    const refreshNow = async () => {
-      if (timer) { clearTimeout(timer); timer = null; }
-      const ok = await load();
-      failures = ok ? 0 : failures + 1;
-      schedule();
-    };
-    refreshNow();
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') refreshNow();
-      else if (timer) { clearTimeout(timer); timer = null; }
-    };
-    const onOnline = () => { setOnline(true); refreshNow(); };
-    const onOffline = () => { setOnline(false); if (timer) { clearTimeout(timer); timer = null; } };
+    // بدون Polling: تحميل عند الفتح، وعند الرجوع للتطبيق بعد ما كان في الخلفية، وعند رجوع النت. الباقي بالزرار.
+    load();
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    const onOnline = () => { setOnline(true); load(); };
+    const onOffline = () => setOnline(false);
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
     return () => {
-      stopped = true;
-      if (timer) clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  };
 
   const run = async (trip: TransportRequest, action: TripAction, payload: { odometer?: number; expectedSmoke?: number } = {}): Promise<boolean> => {
     setBusy(true);
@@ -259,7 +232,7 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
             </p>
           </div>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => load()} aria-label="تحديث" className="p-2.5 rounded-xl hover:bg-slate-800"><RefreshCw className="w-5 h-5" /></button>
+            <button type="button" onClick={refresh} disabled={refreshing} aria-label="تحديث" className="p-2.5 rounded-xl hover:bg-slate-800 disabled:opacity-60"><RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} /></button>
             <button type="button" onClick={() => { if (window.confirm('تسجيل الخروج؟')) onLogout(); }} aria-label="خروج" className="p-2.5 rounded-xl hover:bg-slate-800"><LogOut className="w-5 h-5" /></button>
           </div>
         </div>
@@ -277,6 +250,9 @@ function DriverHome({ session, onLogout }: { session: DriverSession; onLogout: (
       )}
 
       <main className="p-4 space-y-4">
+        <button type="button" onClick={refresh} disabled={refreshing} className="w-full bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-white rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition-all">
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> {refreshing ? 'جاري التحديث...' : 'تحديث الطلبات'}
+        </button>
         {!snap && !error && <div className="text-center text-slate-400 font-bold text-sm py-16 flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> جاري التحميل...</div>}
 
         {buckets?.current && (
