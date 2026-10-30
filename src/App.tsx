@@ -190,11 +190,11 @@ function DashboardLayout() {
   // أعيد تنظيمها على الأقسام الخمسة المعتمدة في مستند المراجعة (الإعدادات / العمليات / المالية /
   // الصيانة / التقارير العامة) — نقل تنظيمي بس، كل الشاشات نفسها زي ما هي من غير حذف أو دمج
   const navStructure = [
-    { type: 'standalone' as const, id: 'dashboard' as const, label: 'لوحة التحكم والتحليلات الحية', icon: LayoutDashboard },
+    { type: 'standalone' as const, id: 'dashboard' as const, label: 'الصفحة الرئيسية', icon: LayoutDashboard },
     {
-      type: 'group' as const, label: 'الإعدادات', icon: Settings,
+      type: 'group' as const, label: 'المستخدمين', icon: Settings,
       items: [
-        { id: 'users_settings' as const, label: 'حماية وإعدادات حسابات النظام', icon: Users },
+        { id: 'users_settings' as const, label: 'إعدادات المستخدمين والصلاحيات', icon: Users },
         { id: 'fleet' as const, label: 'إعدادات السيارات والسائقين (Excel)', icon: Truck },
         { id: 'transport_cost_settings' as const, label: 'إعدادات تكلفة خطوط السير', icon: Fuel },
       ]
@@ -205,8 +205,8 @@ function DashboardLayout() {
         { id: 'transport_requests' as const, label: 'طلبات النقل', icon: Send },
         { id: 'requests_tracking' as const, label: 'متابعة الطلبات', icon: ClipboardList },
         { id: 'driver_tracking' as const, label: 'متابعة السائقين', icon: MapPin },
-        { id: 'license_tracking' as const, label: 'متابعة وتحديث التراخيص المتقدمة', icon: CalendarCheck },
-        { id: 'violations' as const, label: 'تسجيل المخالفات وتفادي التكرار', icon: AlertTriangle },
+        { id: 'license_tracking' as const, label: 'تحديث التراخيص', icon: CalendarCheck },
+        { id: 'violations' as const, label: 'تسجيل المخالفات', icon: AlertTriangle },
       ]
     },
     {
@@ -216,13 +216,13 @@ function DashboardLayout() {
         { id: 'car_daily_costs' as const, label: 'مصاريف وأرباح السيارات اليومية', icon: Gauge },
         { id: 'car_monthly_costs' as const, label: 'المرتبات والسولار والزيت الشهرية', icon: Wallet },
         { id: 'driver_reports' as const, label: 'تقارير السائقين وتكلفة الكيلو', icon: BarChart3 },
-        { id: 'fuel_logs' as const, label: 'سجل التموين', icon: Fuel },
+        { id: 'fuel_logs' as const, label: 'سجل التفويل', icon: Fuel },
         { id: 'service_plans' as const, label: 'الصيانة الوقائية', icon: ClipboardList },
         { id: 'vehicle_profitability' as const, label: 'ربحية السيارات', icon: TrendingUp },
         { id: 'custody_licensing' as const, label: 'فواتير تراخيص', icon: Receipt },
         { id: 'license_invoice_approvals' as const, label: 'اعتماد فواتير التراخيص', icon: FileCheck },
-        { id: 'deductions' as const, label: 'الخصومات الفردية والجماعية', icon: CreditCard },
-        { id: 'cross_accounts' as const, label: 'أرشيف وحسابات السائقين (شهرية)', icon: FileSpreadsheet },
+        { id: 'deductions' as const, label: 'خصم المخالفات', icon: CreditCard },
+        { id: 'cross_accounts' as const, label: 'أرشيف وحسابات السائقين', icon: FileSpreadsheet },
       ]
     },
     {
@@ -237,7 +237,7 @@ function DashboardLayout() {
     {
       type: 'group' as const, label: 'التقارير العامة', icon: FileText,
       items: [
-        { id: 'reports' as const, label: 'شاشة التقارير والمطبوعات الموحدة', icon: FileText },
+        { id: 'reports' as const, label: 'شاشة التقارير', icon: FileText },
       ]
     },
   ];
@@ -326,7 +326,7 @@ function DashboardLayout() {
               </span>
               <div className="min-w-0">
                 <h1 className="font-extrabold text-slate-100 text-sm md:text-base leading-none">مجموعة البنا جروب</h1>
-                <p className="hidden sm:block text-[10px] text-emerald-400 font-semibold mt-0.5">البوابة الرقمية لإدارة الأسطول والعهد المالية</p>
+                <p className="hidden sm:block text-[10px] text-emerald-400 font-semibold mt-0.5">البوابة الرقمية لإدارة الأسطول</p>
               </div>
             </div>
           </div>
@@ -339,7 +339,7 @@ function DashboardLayout() {
               title={db.cloudError || ''}
             >
               <span className={`w-1.5 h-1.5 rounded-full ${db.cloudError ? 'bg-rose-400' : db.isCloudConnected ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
-              <span className="hidden sm:inline">{db.cloudError ? 'فشل المزامنة' : db.isCloudConnected ? 'متزامن مع السحابة' : 'غير متصل بالسحابة'}</span>
+              <span className="hidden sm:inline">{db.cloudError ? 'فشل المزامنة' : db.isCloudConnected ? 'متزامن' : 'غير متصل'}</span>
             </div>
 
             {/* User status & Logout */}
@@ -382,7 +382,7 @@ function DashboardLayout() {
               className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 ${showConsole ? 'bg-emerald-500 border-emerald-450 text-slate-950 shadow shadow-emerald-500/20 font-extrabold' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}
             >
               <Database className="w-4 h-4" />
-              <span className="hidden sm:inline">{showConsole ? 'إغلاق الكونسول' : 'محرر ومراقب Supabase'}</span>
+              <span className="hidden sm:inline">{showConsole ? 'إغلاق' : 'قاعدة البيانات'}</span>
             </button>
 
             {/* Database resetting safety hatch */}
@@ -515,7 +515,7 @@ function DashboardLayout() {
               <div className="bg-emerald-500 h-full w-full"></div>
             </div>
             <p className="text-[10px] text-slate-500 leading-relaxed text-right">
-              تم تشفير وحظر البيانات السحابية بموجب بروتوكولات البنا جروب الصارمة.
+              متصل.
             </p>
           </div>
         </aside>
