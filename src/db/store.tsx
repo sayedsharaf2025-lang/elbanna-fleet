@@ -4972,9 +4972,80 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const visibleInvoiceItems = React.useMemo(() => (invoiceItems || []).filter(it => !draftIdSet.has(it.invoice_id)), [invoiceItems, draftIdSet]);
   const invoiceDraftItems = React.useMemo(() => (invoiceItems || []).filter(it => draftIdSet.has(it.invoice_id)), [invoiceItems, draftIdSet]);
 
+  // ====== عرض طلبات النقل حسب الحساب/الحالة/البحث (تخفيف الحمل) ======
+  // بدل تحميل كل الصفحات: استعلامات مباشرة (الجارية فقط / البحث / عدّ). الصفوف الراجعة بتتضاف للحالة العامة
+  // (لو مش موجودة) عشان إجراءات الرد والتسليم تشتغل عليها زي أي طلب تاني.
+  const mergeTransportRows = (rows: any[]) => {
+    const fresh = notDeleted('transport_requests', (rows || []) as any[]).map((r: any) => normalizeTransportRequest(r));
+    if (fresh.length === 0) return;
+    setTransportRequests(prev => {
+      const known = new Set(prev.map(r => r.id));
+      const added = fresh.filter(r => !known.has(r.id));
+      return added.length > 0
+        ? [...prev, ...added].sort((a, b) => String(b.request_number || '').localeCompare(String(a.request_number || '')))
+        : prev;
+    });
+  };
+
+  const fetchTransportScope = async (opts: { createdBy?: string; statuses?: string[]; term?: string; limit?: number }): Promise<TransportRequest[]> => {
+    const client = getSupabaseClient();
+    if (!client) return [];
+    try {
+      let q = client.from('transport_requests').select('*').order('request_number', { ascending: false }).limit(opts.limit ?? 300);
+      if (opts.createdBy) q = q.eq('created_by', opts.createdBy);
+      if (opts.statuses && opts.statuses.length > 0) q = q.in('status', opts.statuses);
+      const term = (opts.term || '').replace(/["%,()*\\]/g, ' ').trim();
+      if (term) q = q.or(`request_number.ilike."%${term}%",farm_name.ilike."%${term}%"`);
+      const { data, error } = await q;
+      if (error) { console.warn('fetchTransportScope failed', error.message); return []; }
+      const rows = (data || []) as any[];
+      mergeTransportRows(rows);
+      return notDeleted('transport_requests', rows).map((r: any) => normalizeTransportRequest(r));
+    } catch (e) {
+      console.warn('fetchTransportScope exception', e);
+      return [];
+    }
+  };
+
+  const fetchTransportCounts = async (createdBy?: string): Promise<{ new: number; in_progress: number; done: number } | null> => {
+    const client = getSupabaseClient();
+    if (!client) return null;
+    try {
+      const one = async (status: string) => {
+        let q = client.from('transport_requests').select('id', { count: 'exact', head: true }).eq('status', status);
+        if (createdBy) q = q.eq('created_by', createdBy);
+        const { count, error } = await q;
+        if (error) throw error;
+        return count || 0;
+      };
+      const [n, p, d] = await Promise.all([one('new'), one('in_progress'), one('done')]);
+      return { new: n, in_progress: p, done: d };
+    } catch (e) {
+      console.warn('fetchTransportCounts failed', e);
+      return null;
+    }
+  };
+
+  const fetchTransportRequestById = async (id: string): Promise<TransportRequest | null> => {
+    const client = getSupabaseClient();
+    if (!client) return null;
+    try {
+      const { data, error } = await client.from('transport_requests').select('*').eq('id', id).maybeSingle();
+      if (error || !data) return null;
+      mergeTransportRows([data]);
+      const [row] = notDeleted('transport_requests', [data as any]);
+      return row ? normalizeTransportRequest(row) : null;
+    } catch {
+      return null;
+    }
+  };
+
   return (
     <DbContext.Provider
       value={{
+        fetchTransportScope,
+        fetchTransportCounts,
+        fetchTransportRequestById,
         drivers: drivers || [],
         officials: officials || [],
         cars: cars || [],

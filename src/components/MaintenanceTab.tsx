@@ -86,7 +86,8 @@ const compressImage = (file: File, maxSide = 1280, quality = 0.7): Promise<strin
 // ====== أوضاع الشاشة ======
 export type MaintenanceMode = 'requests' | 'manager' | 'parts' | 'accounting';
 
-interface SectionDef { key: string; label: string; statuses: MaintenanceRequestStatus[] | 'all'; highlight?: boolean }
+// searchOnly: القسم ده (الطلبات المنتهية) ما بيعرضش غير نتايج البحث | hideClosed: المغلق مايظهرش غير بالبحث
+interface SectionDef { key: string; label: string; statuses: MaintenanceRequestStatus[] | 'all'; highlight?: boolean; searchOnly?: boolean; hideClosed?: boolean }
 
 const MODE_CONFIG: Record<MaintenanceMode, { title: string; subtitle: string; canCreate: boolean; sections: SectionDef[] }> = {
   requests: {
@@ -96,7 +97,7 @@ const MODE_CONFIG: Record<MaintenanceMode, { title: string; subtitle: string; ca
     sections: [
       { key: 'active', label: 'طلباتي الجارية', statuses: ['new', 'parts_requested', 'parts_purchased', 'in_workshop', 'pending_invoice', 'invoice_review', 'invoice_approved', 'receipt_rejected'] },
       { key: 'repaired', label: 'تم الإصلاح', statuses: ['repaired'], highlight: true },
-      { key: 'closed', label: 'المغلقة', statuses: ['closed'] },
+      { key: 'closed', label: 'المغلقة', statuses: ['closed'], searchOnly: true },
     ],
   },
   manager: {
@@ -109,7 +110,7 @@ const MODE_CONFIG: Record<MaintenanceMode, { title: string; subtitle: string; ca
       { key: 'workshop', label: 'جاري الصيانة بالورشة', statuses: ['in_workshop'] },
       { key: 'review', label: 'اعتماد الفواتير', statuses: ['invoice_review'], highlight: true },
       { key: 'rejected', label: 'رفض الاستلام', statuses: ['receipt_rejected'], highlight: true },
-      { key: 'all', label: 'كل الطلبات', statuses: 'all' },
+      { key: 'all', label: 'كل الطلبات', statuses: 'all', hideClosed: true },
     ],
   },
   parts: {
@@ -129,7 +130,7 @@ const MODE_CONFIG: Record<MaintenanceMode, { title: string; subtitle: string; ca
       { key: 'todo', label: 'بانتظار الفاتورة', statuses: ['pending_invoice'], highlight: true },
       { key: 'review', label: 'بانتظار الاعتماد', statuses: ['invoice_review'] },
       { key: 'approved', label: 'تم الاعتماد', statuses: ['invoice_approved'], highlight: true },
-      { key: 'done', label: 'المنتهية', statuses: ['repaired', 'receipt_rejected', 'closed'] },
+      { key: 'done', label: 'المنتهية', statuses: ['repaired', 'receipt_rejected', 'closed'], searchOnly: true },
     ],
   },
 };
@@ -150,8 +151,11 @@ export function MaintenanceTab({ mode = 'requests' }: { mode?: MaintenanceMode }
 
   const filteredRequests = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
+    // الأقسام المنتهية: العدد بيفضل ظاهر على الزر، لكن الطلبات ماتظهرش غير بالبحث
+    if (!term && section.searchOnly) return [];
     return db.maintenanceRequests
       .filter(r => inSection(section, r))
+      .filter(r => term !== '' || !section.hideClosed || r.status !== 'closed')
       .filter(r => {
         if (!term) return true;
         const car = carFor(r.car_id);
@@ -241,7 +245,7 @@ export function MaintenanceTab({ mode = 'requests' }: { mode?: MaintenanceMode }
             })}
             {filteredRequests.length === 0 && (
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-10 text-center text-slate-400 font-bold">
-                <ClipboardList className="w-8 h-8 mx-auto mb-2 text-slate-300" /> لا توجد طلبات في هذا القسم.
+                <ClipboardList className="w-8 h-8 mx-auto mb-2 text-slate-300" /> {section.searchOnly && !searchTerm.trim() ? 'الطلبات المنتهية بتظهر بالبحث فقط — اكتب رقم السيارة أو رقم الطلب في خانة البحث.' : 'لا توجد طلبات في هذا القسم.'}
               </div>
             )}
           </div>

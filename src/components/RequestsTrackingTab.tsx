@@ -9,6 +9,7 @@ import { useDb } from '../db/store';
 import { TransportRequest } from '../types';
 import { describeTrip, TRIP_STATUS_LABELS } from '../db/logic/tripFlow';
 import { formatLocalDateTime } from '../db/logic/driverTracking';
+import { useScopedTransportRequests } from '../hooks/useScopedTransportRequests';
 import {
   ClipboardList,
   Truck,
@@ -26,12 +27,16 @@ import {
   FileText,
   Send,
   Route,
-  Plus
+  Plus,
+  Search
 } from 'lucide-react';
 
 export function RequestsTrackingTab() {
   const db = useDb();
   const [statusFilter, setStatusFilter] = useState<'new' | 'in_progress' | 'done'>('new');
+  const [searchTerm, setSearchTerm] = useState('');
+  // كل مستخدم بيشوف طلباته بس (الأدمن ومشرف الحركة بيشوفوا الكل) — المنتهي بيظهر بالبحث فقط
+  const scoped = useScopedTransportRequests('requests_tracking', searchTerm);
 
   // Respond-with-car modal state
   const [openRequestId, setOpenRequestId] = useState<string | null>(null);
@@ -58,10 +63,18 @@ export function RequestsTrackingTab() {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   useNavFocus('requests_tracking', (nav) => {
     if (nav.entityType !== 'transport') return;
-    const target = db.transportRequests.find(r => r.id === nav.entityId);
-    if (!target) { setToastMsg({ type: 'error', text: 'الطلب ده مش موجود (اتحذف أو لسه ماوصلش للجهاز ده).' }); setTimeout(() => setToastMsg(null), 4000); return; }
-    setStatusFilter(target.status);
-    setHighlightId(target.id);
+    const focusRow = (target: TransportRequest | null | undefined) => {
+      if (!target || (!scoped.seeAll && (target.created_by || '').trim() !== scoped.me)) {
+        setToastMsg({ type: 'error', text: 'الطلب ده مش موجود (اتحذف أو مش من طلباتك).' });
+        setTimeout(() => setToastMsg(null), 4000);
+        return;
+      }
+      if (target.status === 'done') { setSearchTerm(target.request_number); setStatusFilter('done'); }
+      else { setSearchTerm(''); setStatusFilter(target.status); }
+      setHighlightId(target.id);
+    };
+    const local = db.transportRequests.find(r => r.id === nav.entityId);
+    if (local) focusRow(local); else db.fetchTransportRequestById(nav.entityId).then(focusRow);
   });
   useEffect(() => {
     if (!highlightId) return;
@@ -75,14 +88,13 @@ export function RequestsTrackingTab() {
     setTimeout(() => setToastMsg(null), 4000);
   };
 
-  const counts = {
-    new: db.transportRequests.filter(r => r.status === 'new').length,
-    in_progress: db.transportRequests.filter(r => r.status === 'in_progress').length,
-    done: db.transportRequests.filter(r => r.status === 'done').length
-  };
-
-  const requests = db.transportRequests
-    .filter(r => r.status === statusFilter)
+  // العدادات من السيرفر (زي ما هي)، لكن القائمة: الجارية فقط، والمنتهي ما بيظهرش غير بالبحث
+  const counts = scoped.counts;
+  const searchActive = searchTerm.trim() !== '';
+  const requests = (searchActive
+    ? scoped.matches
+    : statusFilter === 'done' ? [] : scoped.visible.filter(r => r.status === statusFilter))
+    .slice()
     .sort((a, b) => b.request_number.localeCompare(a.request_number));
 
   const openRequest = db.transportRequests.find(r => r.id === openRequestId) || null;
@@ -229,10 +241,27 @@ export function RequestsTrackingTab() {
         </div>
       )}
 
+      {/* Search: بيتجاهل فلتر الحالة، فالطلب المنتهي بيظهر هنا */}
+      <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-2">
+        <Search className="w-4 h-4 text-slate-400 shrink-0" />
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="ابحث برقم الطلب أو اسم المزرعة (بيظهر حتى لو الطلب منتهي)"
+          className="flex-1 p-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-emerald-500 text-slate-800 font-bold"
+        />
+        {searchTerm && (
+          <button type="button" onClick={() => setSearchTerm('')} className="text-slate-400 hover:text-slate-600">
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
       {/* Empty state */}
       {requests.length === 0 && (
         <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm text-center text-slate-400 text-xs font-bold">
-          لا توجد طلبات ضمن هذه الحالة حاليًا.
+          {searchActive ? (scoped.searching ? 'جاري البحث...' : 'لا توجد طلبات مطابقة لبحثك.') : statusFilter === 'done' ? 'الطلبات المنتهية بتظهر بالبحث برقم الطلب فقط — اكتب رقم الطلب في خانة البحث.' : 'لا توجد طلبات ضمن هذه الحالة حاليًا.'}
         </div>
       )}
 
@@ -492,16 +521,6 @@ export function RequestsTrackingTab() {
         })}
       </div>
 
-      {db.hasMoreTransportRequests && (
-        <button
-          type="button"
-          onClick={() => db.loadMoreTransportRequests()}
-          disabled={db.isLoadingMoreRequests}
-          className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg mx-auto mt-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-        >
-          {db.isLoadingMoreRequests ? 'جاري التحميل...' : 'تحميل المزيد'}
-        </button>
-      )}
 
       {/* Respond with Car Modal */}
       {openRequest && (

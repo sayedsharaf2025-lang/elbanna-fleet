@@ -33,6 +33,10 @@ export interface DbContextType {
   hasMoreTransportRequests: boolean;
   isLoadingMoreRequests: boolean;
   loadMoreTransportRequests: () => Promise<void>;
+  // عرض مفلتر (حسب الحساب/الحالة/البحث) بدل تحميل كل الصفحات
+  fetchTransportScope: (opts: { createdBy?: string; statuses?: string[]; term?: string; limit?: number }) => Promise<TransportRequest[]>;
+  fetchTransportCounts: (createdBy?: string) => Promise<{ new: number; in_progress: number; done: number } | null>;
+  fetchTransportRequestById: (id: string) => Promise<TransportRequest | null>;
   farms: string[];
   addTransportRequest: (data: {
     requester_name: string;
