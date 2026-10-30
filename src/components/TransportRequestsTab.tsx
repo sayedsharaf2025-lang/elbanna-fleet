@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { useNavFocus } from '../hooks/useNavFocus';
 import { useDb } from '../db/store';
+import { useScopedTransportRequests } from '../hooks/useScopedTransportRequests';
 import { TransportRequest } from '../types';
 import {
   Send,
@@ -44,12 +45,18 @@ export function TransportRequestsTab() {
 
   // Track Status search state
   const [searchQuery, setSearchQuery] = useState('');
+  // كل مستخدم بيشوف طلباته بس (الأدمن بيشوف الكل) — المنتهي بيظهر بالبحث برقم الطلب فقط
+  const scoped = useScopedTransportRequests('transport_requests', searchQuery);
 
   // فتح الطلب من إشعار: تبويب المتابعة مع البحث برقم الطلب
   useNavFocus('transport_requests', (nav) => {
     if (nav.entityType !== 'transport') return;
     const target = db.transportRequests.find(r => r.id === nav.entityId);
-    if (!target) { setSearchQuery(''); setActiveSubTab('track_status'); return; }
+    if (!target) {
+      setActiveSubTab('track_status');
+      db.fetchTransportRequestById(nav.entityId).then(row => setSearchQuery(row ? row.request_number : ''));
+      return;
+    }
     setActiveSubTab('track_status');
     setSearchQuery(target.request_number);
   });
@@ -102,17 +109,13 @@ export function TransportRequestsTab() {
     return { label: 'منتهى - تم التوصيل', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', Icon: PackageCheck };
   };
 
+  // العرض الافتراضي: طلباتي الجارية فقط (جديد/جاري). المنتهي بيظهر بالبحث برقم الطلب بس.
   const trackResults = React.useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return db.transportRequests;
-    return db.transportRequests
-      .filter(r =>
-        r.request_number.toLowerCase().includes(q) ||
-        r.farm_name.toLowerCase().includes(q) ||
-        r.request_date.includes(q)
-      )
+    if (searchQuery.trim()) return scoped.matches;
+    return scoped.visible
+      .filter(r => r.status !== 'done')
       .sort((a, b) => b.request_number.localeCompare(a.request_number));
-  }, [searchQuery, db.transportRequests]);
+  }, [searchQuery, scoped.matches, scoped.visible]);
 
   const carAndDriverLabel = (r: TransportRequest) => {
     if (!r.assigned_car_id) return null;
@@ -335,7 +338,7 @@ export function TransportRequestsTab() {
 
           {trackResults.length === 0 && (
             <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm text-center text-slate-400 text-xs font-bold">
-              {searchQuery.trim() === '' ? 'لا توجد طلبات نقل مسجلة حاليًا.' : 'لا توجد طلبات مطابقة لبحثك.'}
+              {searchQuery.trim() === '' ? 'مفيش طلبات جارية حاليًا — الطلبات المنتهية بتظهر بالبحث برقم الطلب.' : scoped.searching ? 'جاري البحث...' : 'لا توجد طلبات مطابقة لبحثك.'}
             </div>
           )}
 
@@ -377,16 +380,6 @@ export function TransportRequestsTab() {
             })}
           </div>
 
-          {db.hasMoreTransportRequests && (
-            <button
-              type="button"
-              onClick={() => db.loadMoreTransportRequests()}
-              disabled={db.isLoadingMoreRequests}
-              className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg mx-auto mt-4 flex items-center justify-center gap-2 text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-            >
-              {db.isLoadingMoreRequests ? 'جاري التحميل...' : 'تحميل المزيد'}
-            </button>
-          )}
         </div>
       )}
     </div>
