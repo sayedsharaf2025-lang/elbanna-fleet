@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.keystore binary
+*.png binary
+*.jpg binary

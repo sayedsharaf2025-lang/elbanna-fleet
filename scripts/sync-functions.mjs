@@ -23,7 +23,7 @@ const HEADER = '// ⚠️ ملف متولّد تلقائيًا من {src} — م
 
 function transform(srcRel) {
   const abs = path.join(root, srcRel);
-  let text = fs.readFileSync(abs, 'utf8');
+  let text = fs.readFileSync(abs, 'utf8').replace(/\r\n/g, '\n');
   text = text.replace(/(from\s+['"])(\.{1,2}\/[^'"]+)(['"])/g, (m, a, spec, c) => {
     const resolved = [spec, spec + '.ts'].map(s => path.resolve(path.dirname(abs), s)).find(p => flat.has(p));
     if (!resolved) throw new Error(`${srcRel}: استيراد "${spec}" مش ضمن الملفات المشتركة — ضيفه لقايمة FILES`);
@@ -38,7 +38,7 @@ fs.mkdirSync(OUT, { recursive: true });
 for (const f of FILES) {
   const target = path.join(OUT, path.basename(f));
   const want = transform(f);
-  const have = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
+  const have = fs.existsSync(target) ? fs.readFileSync(target, 'utf8').replace(/\r\n/g, '\n') : null;
   if (have === want) continue;
   if (check) { console.error(`غير متزامن: supabase/functions/_shared/${path.basename(f)} (شغّل npm run sync:functions)`); bad++; }
   else { fs.writeFileSync(target, want); console.log('تم نسخ', f); }
